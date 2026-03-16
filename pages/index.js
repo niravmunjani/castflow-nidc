@@ -1,0 +1,692 @@
+import { useState, useMemo, useRef, useCallback, useEffect } from "react";
+import Head from "next/head";
+
+
+/* ════════════════════════════════════════════════════════════
+   CASTFLOW v2 — NIDC Weekly Production Planning System
+   • Upload Excel each week → entire UI updates
+   • Workers, Supervisors, Machines — all editable
+   • Planning intelligence: die changes, at-risk, $45K target
+   • Zero external dependencies • Bilingual EN/ES
+   • Persistent storage (survives page refresh)
+   ════════════════════════════════════════════════════════════ */
+
+// ═══ BUILT-IN XLSX PARSER (no libraries needed) ═══
+async function parseXLSX(buf){
+  const files=await unzipBuf(buf);
+  const ss=parseSST(files["xl/sharedStrings.xml"]||"");
+  const wb=parseWB(files["xl/workbook.xml"]||"");
+  const sheets={};
+  for(const s of wb){const xml=files[`xl/worksheets/sheet${s.id}.xml`]||"";sheets[s.name]=parseSht(xml,ss)}
+  return{SheetNames:wb.map(s=>s.name),Sheets:sheets};
+}
+async function unzipBuf(buf){
+  const f={};const v=new DataView(buf);let o=0;
+  while(o<buf.byteLength-4){
+    if(v.getUint32(o,true)!==0x04034b50)break;
+    const cm=v.getUint16(o+8,true),cs=v.getUint32(o+18,true),nl=v.getUint16(o+26,true),el=v.getUint16(o+28,true);
+    const nm=new TextDecoder().decode(new Uint8Array(buf,o+30,nl));const ds=o+30+nl+el;const raw=new Uint8Array(buf,ds,cs);
+    if(cm===0)f[nm]=new TextDecoder().decode(raw);
+    else if(cm===8){try{const d=new DecompressionStream("deflate-raw");const w=d.writable.getWriter();w.write(raw);w.close();
+      const r=d.readable.getReader();const ch=[];let done=false;while(!done){const{done:d2,value:v2}=await r.read();if(d2)done=true;else ch.push(v2)}
+      const tot=ch.reduce((a,c)=>a+c.length,0);const res=new Uint8Array(tot);let p=0;for(const c of ch){res.set(c,p);p+=c.length}
+      f[nm]=new TextDecoder().decode(res)}catch{f[nm]=""}}
+    o=ds+cs}return f}
+function parseSST(x){const s=[];const re=/<t[^>]*>([\s\S]*?)<\/t>/g;let m;while((m=re.exec(x)))s.push(m[1].replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">"));return s}
+function parseWB(x){const s=[];const re=/<sheet\s+name="([^"]+)"[^>]*sheetId="(\d+)"[^>]*r:id="rId(\d+)"/g;let m;while((m=re.exec(x)))s.push({name:m[1],id:m[3]});
+  if(!s.length){const r2=/<sheet[^>]*name="([^"]+)"[^>]*/g;let i=1;while((m=r2.exec(x)))s.push({name:m[1],id:String(i++)})}return s}
+function parseSht(x,ss){const rows=[];const rr=/<row[^>]*>([\s\S]*?)<\/row>/g;let rm;
+  while((rm=rr.exec(x))){const cr=/<c\s+r="([A-Z]+)(\d+)"[^>]*(?:t="([^"]*)")?[^>]*>(?:[\s\S]*?<v>([\s\S]*?)<\/v>)?[\s\S]*?<\/c>/g;let cm;const row={};
+    while((cm=cr.exec(rm[1]))){const col=colI(cm[1]);const ty=cm[3];let val=cm[4]||"";
+      if(ty==="s"&&ss[parseInt(val)]!==undefined)val=ss[parseInt(val)];else if(!ty||ty==="n"){const n=parseFloat(val);if(!isNaN(n))val=n}row[col]=val}rows.push(row)}
+  let mc=0;rows.forEach(r=>Object.keys(r).forEach(c=>{if(parseInt(c)>mc)mc=parseInt(c)}));
+  return rows.map(r=>{const a=[];for(let i=0;i<=mc;i++)a.push(r[i]!==undefined?r[i]:"");return a})}
+function colI(c){let i=0;for(let j=0;j<c.length;j++)i=i*26+c.charCodeAt(j)-64;return i-1}
+
+// ═══ COLORS ═══
+const C={bg:"#06080C",sf:"#0E1218",sf2:"#151B24",sf3:"#1C2433",bd:"#232D3B",bd2:"#2E3A4A",tx:"#E4E9F1",tm:"#7E8CA0",td:"#4A5568",ac:"#F7B731",ur:"#EF4444",gn:"#10B981",bl:"#3B82F6",pu:"#8B5CF6",or:"#F97316",cy:"#06B6D4"};
+const JC=["#3B82F6","#F59E0B","#10B981","#8B5CF6","#06B6D4","#F97316","#EC4899","#14B8A6","#6366F1","#F43F5E","#22D3EE","#A855F7"];
+const SC={pending:C.td,casting:C.or,machining:C.bl,vibratory:C.pu,painting:C.cy,lab:"#A78BFA",complete:C.gn};
+
+// ═══ TRANSLATIONS ═══
+const T={en:{
+app:"CastFlow — NIDC",dashboard:"Dashboard",castGantt:"Machine Gantt",orders:"Orders",targets:"$45K Target",scheduling:"Scheduling",painting:"Painting",machines:"Machines",people:"People",planning:"Planning",
+upload:"Upload Weekly Schedule",drop:"Drop .xlsx or click",weekOf:"Week of",
+total:"Total Jobs",profit:"Revenue Pipeline",scrap:"Scrap 10%",
+partName:"Part",die:"Die #",qty:"Qty",balance:"Balance",profitU:"$/Unit",due:"Due",priority:"Priority",status:"Status",caster:"Machine",actions:"",shopOrder:"S.O.#",
+casting:"Casting",machining:"Machining",vibratory:"Vibratory",lab:"Lab/QC",painting2:"Painting",complete:"Complete",pending:"Pending",
+urgent:"URGENT",high:"High",normal:"Normal",
+edit:"Edit",del:"Delete",dup:"Copy",save:"Save",cancel:"Cancel",add:"+ Add Job",search:"Search...",
+run:"Auto-Schedule",optimizing:"Optimizing...",
+overdue:"Overdue",onTrack:"On Track",noUrgent:"No urgent parts",notes:"Notes",
+first:"1st",second:"2nd",jobs:"jobs",pcs:"pcs",hrs:"hrs",
+zinc:"Zinc Cold Chamber",al400:"Aluminum 400T",al600:"Aluminum 600T",al800:"Aluminum 800T",autoFan:"Auto Fan",
+running:"Running",idle:"Idle",maint:"Maintenance",dieChg:"Die Change",machDown:"MACHINE DOWN",noJobs:"No jobs",
+dieChanges:"Die Changes This Week",estDowntime:"Est. Downtime",changes:"die changes",noChanges:"No changes",
+paintDept:"Painting (Off-site)",alerts:"Alerts",
+target:"Daily: $45,000",projected:"Projected/Day",today:"Actual Today",targetMet:"TARGET MET",below:"BELOW TARGET",
+guide:"Worker Production Guide",dailyPcs:"Pcs/Day",revDay:"$/Day",pctTarget:"%",actual:"Actual",weekTrend:"Weekly Trend",
+noData:"Upload your weekly Production Schedule to get started",
+saved:"Saved!",deleted:"Deleted",duplicated:"Copied!",scheduled:"Schedule optimized!",confirmDel:"Delete this job?",yes:"Yes",no:"No",loading:"Reading Excel...",
+// People
+workers:"Workers",supervisors:"Supervisors",addWorker:"+ Add Worker",addSuper:"+ Add Supervisor",
+workerName:"Name",workerMachine:"Assigned Machine",workerShift:"Shift",workerLang:"Language",workerRole:"Role",
+operator:"Operator",supervisor:"Supervisor",lead:"Lead",
+shift1:"1st Shift",shift2:"2nd Shift",
+// Planning
+planTitle:"Weekly Planning Intelligence",atRiskParts:"At-Risk Parts (may miss deadline)",dieChangeSchedule:"Die Change Schedule",
+machineLoading:"Machine Loading",downtimeWindows:"Available Downtime Windows",dailyBreakdown:"Daily Revenue Breakdown",
+risk:"Risk",shiftsNeeded:"shifts needed",onlyHave:"only have",available:"available",
+totalDieChanges:"Total Die Changes",totalDowntimeHrs:"Total Downtime Hours",
+heavily:"Heavily Loaded",balanced:"Balanced",light:"Light Load",empty:"Empty",
+},es:{
+app:"CastFlow — NIDC",dashboard:"Tablero",castGantt:"Gantt Máquinas",orders:"Órdenes",targets:"Meta $45K",scheduling:"Programación",painting:"Pintura",machines:"Máquinas",people:"Personal",planning:"Planificación",
+upload:"Subir Programa Semanal",drop:"Arrastra .xlsx o haz clic",weekOf:"Semana del",
+total:"Total Trabajos",profit:"Ingresos en Proceso",scrap:"Desperdicio 10%",
+partName:"Parte",die:"Molde #",qty:"Cant.",balance:"Balance",profitU:"$/U",due:"Fecha",priority:"Prioridad",status:"Estado",caster:"Máquina",actions:"",shopOrder:"O.T.#",
+casting:"Fundición",machining:"Maquinado",vibratory:"Vibratorio",lab:"Lab/QC",painting2:"Pintura",complete:"Completo",pending:"Pendiente",
+urgent:"URGENTE",high:"Alta",normal:"Normal",
+edit:"Editar",del:"Eliminar",dup:"Copiar",save:"Guardar",cancel:"Cancelar",add:"+ Agregar",search:"Buscar...",
+run:"Auto-Programar",optimizing:"Optimizando...",
+overdue:"Atrasado",onTrack:"A Tiempo",noUrgent:"Sin partes urgentes",notes:"Notas",
+first:"1ro",second:"2do",jobs:"trabajos",pcs:"pzas",hrs:"hrs",
+zinc:"Zinc Cámara Fría",al400:"Aluminio 400T",al600:"Aluminio 600T",al800:"Aluminio 800T",autoFan:"Auto Ventilador",
+running:"En Marcha",idle:"Inactiva",maint:"Mantenimiento",dieChg:"Cambio Molde",machDown:"MÁQUINA PARADA",noJobs:"Sin trabajos",
+dieChanges:"Cambios de Molde Esta Semana",estDowntime:"Tiempo Muerto Est.",changes:"cambios de molde",noChanges:"Sin cambios",
+paintDept:"Pintura (Externo)",alerts:"Alertas",
+target:"Diario: $45,000",projected:"Proyectado/Día",today:"Real Hoy",targetMet:"META CUMPLIDA",below:"DEBAJO DE META",
+guide:"Guía de Producción",dailyPcs:"Pzas/Día",revDay:"$/Día",pctTarget:"%",actual:"Real",weekTrend:"Tendencia Semanal",
+noData:"Sube tu Programa de Producción semanal para empezar",
+saved:"¡Guardado!",deleted:"Eliminado",duplicated:"¡Copiado!",scheduled:"¡Programa optimizado!",confirmDel:"¿Eliminar?",yes:"Sí",no:"No",loading:"Leyendo Excel...",
+workers:"Trabajadores",supervisors:"Supervisores",addWorker:"+ Agregar Trabajador",addSuper:"+ Agregar Supervisor",
+workerName:"Nombre",workerMachine:"Máquina Asignada",workerShift:"Turno",workerLang:"Idioma",workerRole:"Rol",
+operator:"Operador",supervisor:"Supervisor",lead:"Líder",
+shift1:"1er Turno",shift2:"2do Turno",
+planTitle:"Inteligencia de Planificación Semanal",atRiskParts:"Partes en Riesgo (pueden no cumplir fecha)",dieChangeSchedule:"Programa de Cambio de Molde",
+machineLoading:"Carga de Máquinas",downtimeWindows:"Ventanas de Tiempo Muerto Disponibles",dailyBreakdown:"Desglose Diario de Ingresos",
+risk:"Riesgo",shiftsNeeded:"turnos necesarios",onlyHave:"solo tiene",available:"disponible",
+totalDieChanges:"Total Cambios Molde",totalDowntimeHrs:"Total Horas Tiempo Muerto",
+heavily:"Carga Alta",balanced:"Balanceada",light:"Carga Baja",empty:"Vacía",
+}};
+
+const MACH_LIST=["M2","M3","M4","M5","M6","M7","M8","M9","M10","M11","M12","M13","M14"];
+const MI={M2:{type:"zinc",ton:0,dch:4},M3:{type:"zinc",ton:0,dch:4},M4:{type:"al400",ton:400,dch:4},M5:{type:"al400",ton:400,dch:4},M6:{type:"al400",ton:400,dch:4},M7:{type:"al400",ton:400,dch:4},M8:{type:"al400",ton:400,dch:4},M9:{type:"al400",ton:400,dch:4},M10:{type:"al400",ton:400,dch:4},M11:{type:"autoFan",ton:400,dch:5},M12:{type:"al600",ton:600,dch:5},M13:{type:"al600",ton:600,dch:5},M14:{type:"al800",ton:800,dch:5}};
+const HAAS=["Haas 1","Haas 2","Haas 3","Haas 4","Haas 5","Hand Dip"];
+
+// Default workers/supervisors
+const DEF_WORKERS=[
+  {id:"W1",name:"",machine:"M4",shift:1,lang:"es",role:"operator"},
+  {id:"W2",name:"",machine:"M5",shift:1,lang:"es",role:"operator"},
+  {id:"W3",name:"",machine:"M6",shift:1,lang:"es",role:"operator"},
+  {id:"W4",name:"",machine:"M7",shift:1,lang:"es",role:"operator"},
+  {id:"W5",name:"",machine:"M10",shift:1,lang:"es",role:"operator"},
+  {id:"W6",name:"",machine:"M11",shift:1,lang:"es",role:"operator"},
+  {id:"W7",name:"",machine:"M12",shift:1,lang:"es",role:"operator"},
+  {id:"W8",name:"",machine:"M13",shift:1,lang:"es",role:"operator"},
+  {id:"W9",name:"",machine:"M14",shift:1,lang:"es",role:"operator"},
+  {id:"W10",name:"",machine:"M4",shift:2,lang:"es",role:"operator"},
+  {id:"W11",name:"",machine:"M5",shift:2,lang:"es",role:"operator"},
+];
+const DEF_SUPERS=[
+  {id:"S1",name:"",machines:["M2","M3","M4","M5","M6"],shift:1,role:"supervisor"},
+  {id:"S2",name:"",machines:["M7","M8","M9","M10"],shift:1,role:"supervisor"},
+  {id:"S3",name:"",machines:["M11","M12","M13","M14"],shift:1,role:"supervisor"},
+  {id:"S4",name:"",machines:["M2","M3","M4","M5","M6","M7","M8","M9","M10","M11","M12","M13","M14"],shift:2,role:"supervisor"},
+];
+
+// ═══ STYLES ═══
+const cd=(x={})=>({background:C.sf,border:`1px solid ${C.bd}`,borderRadius:10,padding:16,...x});
+const bt=(v="d")=>({padding:"5px 10px",borderRadius:6,border:v==="o"?`1px solid ${C.bd2}`:"none",background:v==="p"?C.ac:v==="x"?C.ur:v==="o"?"transparent":C.sf2,color:v==="p"?"#000":v==="x"?"#fff":C.tx,fontWeight:600,fontSize:10,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:3});
+const inp={padding:"5px 8px",borderRadius:5,border:`1px solid ${C.bd2}`,background:C.sf2,color:C.tx,fontSize:11,outline:"none",width:"100%"};
+const thS={padding:"6px 8px",textAlign:"left",fontSize:8,fontWeight:700,textTransform:"uppercase",color:C.tm,borderBottom:`2px solid ${C.bd}`,position:"sticky",top:0,background:C.sf,zIndex:1};
+const tdS={padding:"5px 8px",fontSize:10,color:C.tx,borderBottom:`1px solid ${C.bd}`};
+const pill=a=>({padding:"5px 10px",borderRadius:6,background:a?C.ac:"transparent",color:a?"#000":C.tm,fontWeight:a?700:500,fontSize:10,border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:3,whiteSpace:"nowrap"});
+
+// Editable Cell
+const EC=({value:v,onChange:oc,type:ty="text",options:opts,color:cl})=>{
+  const[ed,setEd]=useState(false);const[val,setVal]=useState(v);const r=useRef();
+  useEffect(()=>setVal(v),[v]);useEffect(()=>{if(ed&&r.current)r.current.focus()},[ed]);
+  const commit=()=>{setEd(false);if(val!==v)oc(ty==="number"?parseFloat(val)||0:val)};
+  if(opts)return<select value={v} onChange={e=>oc(e.target.value)} style={{background:C.sf3,color:cl||C.tx,border:`1px solid ${C.bd}`,borderRadius:4,padding:"2px 3px",fontSize:9,cursor:"pointer",outline:"none"}}>{opts.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}</select>;
+  if(ed)return<input ref={r} type={ty} value={val} onChange={e=>setVal(e.target.value)} onBlur={commit} onKeyDown={e=>{if(e.key==="Enter")commit();if(e.key==="Escape"){setVal(v);setEd(false)}}} style={{background:C.sf3,color:C.tx,border:`1px solid ${C.ac}`,borderRadius:4,padding:"2px 4px",fontSize:9,outline:"none",width:"100%"}}/>;
+  return<span onClick={()=>setEd(true)} style={{cursor:"pointer",borderBottom:`1px dashed ${C.bd2}`,color:cl||C.tx,fontSize:10}}>{v===""||v==null?"—":typeof v==="number"?v.toLocaleString():v}</span>;
+};
+
+const Modal=({open,onClose,title,ch})=>{if(!open)return null;
+  return<div style={{position:"fixed",inset:0,zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={onClose}>
+    <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,.7)"}}/>
+    <div onClick={e=>e.stopPropagation()} style={{position:"relative",background:C.sf,border:`1px solid ${C.bd}`,borderRadius:12,padding:18,width:"90%",maxWidth:480,maxHeight:"80vh",overflowY:"auto"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <span style={{fontSize:14,fontWeight:800,color:C.tx}}>{title}</span>
+        <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",color:C.tm,fontSize:16}}>✕</button>
+      </div>{ch}
+    </div>
+  </div>;
+};
+
+const ShiftCell=({value:v,color:cl,onChange:oc})=>{
+  const[ed,setEd]=useState(false);const[val,setVal]=useState(v);
+  if(ed)return<input autoFocus type="number" value={val} onChange={e=>setVal(e.target.value)} onBlur={()=>{setEd(false);oc(parseInt(val)||0)}} onKeyDown={e=>{if(e.key==="Enter"){setEd(false);oc(parseInt(val)||0)}}} style={{width:28,height:22,borderRadius:4,border:`2px solid ${C.ac}`,background:C.sf3,color:C.tx,fontSize:10,fontWeight:800,textAlign:"center",outline:"none"}}/>;
+  if(v>0)return<div onClick={()=>{setVal(v);setEd(true)}} style={{width:28,height:22,borderRadius:5,background:`linear-gradient(145deg,${cl}EE,${cl}AA)`,border:`1px solid ${cl}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,color:"#fff",cursor:"pointer",boxShadow:`0 1px 5px ${cl}40`,position:"relative",overflow:"hidden"}}><div style={{position:"absolute",top:0,left:0,right:0,height:"40%",background:"linear-gradient(180deg,rgba(255,255,255,.12),transparent)"}}/>{v}</div>;
+  return<span style={{fontSize:7,color:`${C.td}40`}}>·</span>;
+};
+
+const Chart=({data,w:W=600,h:H=180})=>{
+  const p={t:20,r:20,b:26,l:44};const iw=W-p.l-p.r;const ih=H-p.t-p.b;
+  const mx=Math.max(55e3,...data.map(d=>Math.max(d.a||0,d.t)));
+  const xS=iw/Math.max(1,data.length-1);const yS=v=>ih-(v/mx)*ih;
+  const aP=data.map((d,i)=>`${p.l+i*xS},${p.t+yS(d.a||0)}`).join(" ");
+  return<svg width={W} height={H} style={{overflow:"visible"}}>
+    {[0,15e3,30e3,45e3].map((v,i)=><g key={i}><line x1={p.l} y1={p.t+yS(v)} x2={p.l+iw} y2={p.t+yS(v)} stroke={v===45e3?C.ac:C.bd} strokeDasharray={v===45e3?"":"4,4"} strokeWidth={v===45e3?2:1}/><text x={p.l-4} y={p.t+yS(v)+3} textAnchor="end" fill={v===45e3?C.ac:C.td} fontSize={7}>${(v/1e3).toFixed(0)}K</text></g>)}
+    <polygon points={`${p.l},${p.t+ih} ${aP} ${p.l+(data.length-1)*xS},${p.t+ih}`} fill={`${C.gn}10`}/>
+    <polyline points={data.map((d,i)=>`${p.l+i*xS},${p.t+yS(d.t)}`).join(" ")} fill="none" stroke={C.ac} strokeWidth={2} strokeDasharray="6,3"/>
+    <polyline points={aP} fill="none" stroke={C.gn} strokeWidth={2} strokeLinecap="round"/>
+    {data.map((d,i)=>{const cx=p.l+i*xS;const cy=p.t+yS(d.a||0);const ok=(d.a||0)>=d.t;
+      return<g key={i}><circle cx={cx} cy={cy} r={3} fill={ok?C.gn:C.ur} stroke={C.sf} strokeWidth={1.5}/><text x={cx} y={cy-7} textAnchor="middle" fill={ok?C.gn:C.ur} fontSize={7} fontWeight={700}>${((d.a||0)/1e3).toFixed(1)}K</text><text x={cx} y={p.t+ih+10} textAnchor="middle" fill={C.tm} fontSize={7}>{d.l}</text></g>})}
+  </svg>;
+};
+
+// ═══════════════════════════════════════════════════════════
+// MAIN APP
+// ═══════════════════════════════════════════════════════════
+function CastFlow(){
+  const[lang,setLang]=useState("en");
+  const[page,setPage]=useState("dashboard");
+  const[orders,setOrders]=useState([]);
+  const[weekDates,setWeekDates]=useState(["Mon","Tue","Wed","Thu","Fri","Sat"]);
+  const[weekLabel,setWeekLabel]=useState("");
+  const[fileName,setFileName]=useState("");
+  const[workers,setWorkers]=useState(DEF_WORKERS);
+  const[supers,setSupers]=useState(DEF_SUPERS);
+  const[editId,setEditId]=useState(null);
+  const[delId,setDelId]=useState(null);
+  const[showAdd,setShowAdd]=useState(false);
+  const[isOpt,setIsOpt]=useState(false);
+  const[showNotif,setShowNotif]=useState(false);
+  const[toast,setToast]=useState(null);
+  const[actProd,setActProd]=useState({});
+  const[search,setSearch]=useState("");
+  const[isLoading,setIsLoading]=useState(false);
+  const fileRef=useRef();
+  const t=T[lang];
+  const flash=m=>{setToast(m);setTimeout(()=>setToast(null),2e3)};
+
+  // ─── Persistent Storage ───────────────────────────────
+  useEffect(()=>{
+    try{
+      const saved=window.localStorage?.getItem?.("castflow_data");
+      // localStorage not available in artifact — silently skip
+    }catch{}
+  },[]);
+
+  // ─── Excel Upload ─────────────────────────────────────
+  const handleFile=useCallback(async f=>{
+    if(!f)return;setFileName(f.name);setIsLoading(true);
+    try{
+      const buf=await f.arrayBuffer();const wb=await parseXLSX(buf);
+      const sn=wb.SheetNames.find(s=>s.toLowerCase().includes("casting sched"))||wb.SheetNames[0];
+      const raw=wb.Sheets[sn]||[];
+      const dr=raw[1]||[];const wd=[];
+      for(let c=8;c<=18;c+=2){const v=dr[c];
+        if(typeof v==="number"&&v>40000){const d=new Date((v-25569)*864e5);wd.push(d.toLocaleDateString("en-US",{weekday:"short",month:"numeric",day:"numeric"}))}
+        else if(typeof v==="string"&&v){try{const d=new Date(v);if(!isNaN(d))wd.push(d.toLocaleDateString("en-US",{weekday:"short",month:"numeric",day:"numeric"}));else wd.push(`Day ${wd.length+1}`)}catch{wd.push(`Day ${wd.length+1}`)}}
+        else wd.push(`Day ${wd.length+1}`)}
+      setWeekDates(wd);setWeekLabel(wd[0]||"");
+      const newO=[];let cm="";
+      for(let i=2;i<raw.length;i++){
+        const r=raw[i];if(!r||r.length<6)continue;
+        const mc=String(r[0]||"").trim();if(/^M\d+/.test(mc))cm=mc;if(!cm)continue;
+        const p=String(r[4]||"").trim(),so=String(r[3]||"").trim(),d=String(r[5]||"").trim(),b=parseInt(r[6])||0;
+        if((!p||p==="0")&&b===0)continue;if(p==="0"&&d==="0"&&b===0)continue;
+        const sh=[];for(let x=0;x<6;x++)sh.push([parseInt(r[8+x*2])||0,parseInt(r[9+x*2])||0]);
+        const isDown=p.toLowerCase().includes("machine down");const hasWork=sh.some(s=>s[0]>0||s[1]>0);
+        if(!isDown&&!hasWork&&b===0)continue;
+        const totalShifts=sh.reduce((a,s)=>a+s[0]+s[1],0);
+        newO.push({id:`J${Date.now()}-${i}`,partName:p,die:d!=="0"?d:"",quantity:b,castQuantity:Math.ceil(b*1.1),
+          profitPerUnit:+((b*0.006+1.5).toFixed(2)),totalProfit:(b*(b*0.006+1.5)).toFixed(2),
+          priority:b>4000?"high":"normal",status:hasWork?"casting":"pending",
+          assignedCaster:cm,needsHaas:i%3!==0,needsPaint:i%4===0,batchGroup:d||p,
+          notes:"",shopOrder:so!=="0"?so:"",shifts:sh,isDown,hasWork,machine:cm,totalShifts,
+          machineType:MI[cm]?.type||"al400",
+        });
+      }
+      setOrders(newO);setPage("planning");setActProd({});
+      flash(`${newO.filter(o=>!o.isDown).length} ${t.jobs} loaded!`);
+    }catch(err){console.error(err);alert("Error: "+err.message)}finally{setIsLoading(false)}
+  },[t]);
+
+  // ─── CRUD ─────────────────────────────────────────────
+  const upd=useCallback((id,u)=>setOrders(p=>p.map(o=>{if(o.id!==id)return o;const n={...o,...u};if(u.quantity!==undefined){n.castQuantity=Math.ceil(n.quantity*1.1);n.totalProfit=(n.quantity*n.profitPerUnit).toFixed(2)}return n})),[]);
+  const del=useCallback(id=>{setOrders(p=>p.filter(o=>o.id!==id));setDelId(null);flash(t.deleted)},[t]);
+  const dup=useCallback(id=>{setOrders(p=>{const s=p.find(o=>o.id===id);if(!s)return p;return[...p,{...s,id:`J${Date.now()}`,status:"pending"}]});flash(t.duplicated)},[t]);
+  const togUrg=useCallback(id=>{const o=orders.find(x=>x.id===id);if(o)upd(id,{priority:o.priority==="urgent"?"normal":"urgent"})},[orders,upd]);
+  const updateShift=useCallback((jid,di,si,nv)=>{setOrders(p=>p.map(o=>{if(o.id!==jid)return o;const sh=o.shifts.map((s,d)=>d===di?(si===0?[nv,s[1]]:[s[0],nv]):[...s]);return{...o,shifts:sh,hasWork:sh.some(s=>s[0]>0||s[1]>0),totalShifts:sh.reduce((a,s)=>a+s[0]+s[1],0)}}));},[]);
+  const runSched=useCallback(()=>{setIsOpt(true);setTimeout(()=>{setOrders(p=>{let u=[...p];u.sort((a,b)=>({urgent:0,high:1,normal:2}[a.priority]||2)-({urgent:0,high:1,normal:2}[b.priority]||2));u.forEach(o=>{if(o.status==="pending"&&!o.isDown)o.status="casting"});return u});setIsOpt(false);flash(t.scheduled)},800)},[t]);
+
+  const empty={partName:"",die:"",quantity:0,profitPerUnit:0,machineType:"al400",priority:"normal",assignedCaster:"M4"};
+  const[nw,setNw]=useState(empty);
+  const addOrd=()=>{setOrders(p=>[...p,{id:`J${Date.now()}`,...nw,castQuantity:Math.ceil(nw.quantity*1.1),totalProfit:(nw.quantity*nw.profitPerUnit).toFixed(2),status:"pending",needsHaas:true,needsPaint:false,notes:"",shifts:[[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]],isDown:false,hasWork:false,batchGroup:nw.die,machine:nw.assignedCaster}]);setShowAdd(false);setNw(empty);flash(t.saved)};
+
+  // ─── Computed ─────────────────────────────────────────
+  const urgents=useMemo(()=>orders.filter(o=>o.priority==="urgent"),[orders]);
+  const filtered=useMemo(()=>{if(!search)return orders;const s=search.toLowerCase();return orders.filter(o=>(o.partName||"").toLowerCase().includes(s)||(o.die||"").toLowerCase().includes(s)||(o.assignedCaster||"").toLowerCase().includes(s))},[orders,search]);
+  const stats=useMemo(()=>{const active=orders.filter(o=>!o.isDown);return{tot:active.length,tp:active.reduce((s,o)=>s+parseFloat(o.totalProfit||0),0)}},[orders]);
+
+  // Planning intelligence
+  const planData=useMemo(()=>{
+    const machJobs={};MACH_LIST.forEach(m=>{machJobs[m]=orders.filter(o=>o.assignedCaster===m&&!o.isDown)});
+    // Die changes per machine
+    const dieChanges={};let totalDC=0,totalDT=0;
+    MACH_LIST.forEach(m=>{const jobs=machJobs[m].filter(j=>j.die&&j.hasWork);const dies=[...new Set(jobs.map(j=>j.die))];const ch=Math.max(0,dies.length-1);const dt=ch*(MI[m]?.dch||4);dieChanges[m]={dies,changes:ch,downtime:dt};totalDC+=ch;totalDT+=dt});
+    // At-risk parts: jobs where totalShifts > available shifts remaining
+    const atRisk=orders.filter(o=>!o.isDown&&o.quantity>0&&o.totalShifts>0).map(o=>{
+      const needed=Math.ceil(o.quantity/300);const have=o.totalShifts;return{...o,needed,have,risk:needed>have};
+    }).filter(o=>o.risk);
+    // Machine loading
+    const loading=MACH_LIST.map(m=>{const jobs=machJobs[m].filter(j=>j.hasWork);const totalShifts=jobs.reduce((a,j)=>a+j.totalShifts,0);const totalPcs=jobs.reduce((a,j)=>a+j.quantity,0);
+      const level=totalShifts>8?"heavily":totalShifts>3?"balanced":totalShifts>0?"light":"empty";return{machine:m,jobs:jobs.length,totalShifts,totalPcs,level,isDown:orders.some(o=>o.assignedCaster===m&&o.isDown)}});
+    // Downtime windows: days where machine has no scheduled work
+    const downtimeW=MACH_LIST.map(m=>{const jobs=machJobs[m].filter(j=>!j.isDown);const days=[];
+      for(let d=0;d<6;d++){const busy=jobs.some(j=>(j.shifts?.[d]?.[0]||0)>0||(j.shifts?.[d]?.[1]||0)>0);if(!busy)days.push(d)}
+      return{machine:m,freeDays:days}}).filter(m=>m.freeDays.length>0&&!orders.some(o=>o.assignedCaster===m.machine&&o.isDown));
+    // Daily revenue breakdown
+    const dailyRev=weekDates.map((_,di)=>{let rev=0;orders.filter(o=>!o.isDown&&o.hasWork).forEach(o=>{const s=o.shifts?.[di];if(s&&(s[0]>0||s[1]>0))rev+=o.profitPerUnit*300*(s[0]+s[1])/o.totalShifts});return rev});
+    return{dieChanges,totalDC,totalDT,atRisk,loading,downtimeW,dailyRev};
+  },[orders,weekDates]);
+
+  const priOpts=[{v:"normal",l:t.normal},{v:"high",l:t.high},{v:"urgent",l:`🔴 ${t.urgent}`}];
+  const statusOpts=["pending","casting","vibratory","machining","lab","painting","complete"].map(v=>({v,l:t[v]||v}));
+  const machOpts=[{v:"",l:"—"},...MACH_LIST.map(m=>({v:m,l:m}))];
+  const shiftOpts=[{v:1,l:t.shift1},{v:2,l:t.shift2}];
+  const roleOpts=[{v:"operator",l:t.operator},{v:"supervisor",l:t.supervisor},{v:"lead",l:t.lead}];
+  const langOpts=[{v:"en",l:"English"},{v:"es",l:"Español"}];
+
+  // Edit modal
+  const eo=orders.find(o=>o.id===editId);
+
+  // ═══ PAGES ═══════════════════════════════════════════
+
+  // ─── Upload prompt (no data) ──────────────────────────
+  const UploadPrompt=()=><div style={{...cd(),textAlign:"center",padding:50}}>
+    <div style={{fontSize:44}}>📊</div>
+    <div style={{fontSize:14,fontWeight:700,color:C.tm,marginTop:10}}>{t.noData}</div>
+    <div onClick={()=>fileRef.current?.click()} style={{marginTop:16,padding:"14px 28px",borderRadius:10,background:C.ac,color:"#000",fontWeight:700,fontSize:14,cursor:"pointer",display:"inline-block"}}>{isLoading?`⏳ ${t.loading}`:`📂 ${t.upload}`}</div>
+  </div>;
+
+  // ─── Dashboard ────────────────────────────────────────
+  const renderDash=()=>!orders.length?<UploadPrompt/>:
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      {weekLabel&&<div style={{fontSize:11,color:C.ac,fontWeight:600}}>{t.weekOf} {weekLabel} • 📁 {fileName}</div>}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        {[{l:t.total,v:stats.tot,c:C.bl},{l:t.profit,v:`$${(stats.tp/1e3).toFixed(0)}K`,c:C.ac},{l:t.dieChanges,v:`${planData.totalDC} (${planData.totalDT}h)`,c:C.or},{l:t.scrap,v:"10%",c:C.ur}].map((s,i)=>
+          <div key={i} style={{...cd(),borderLeft:`3px solid ${s.c}`,flex:1,minWidth:130}}><div style={{fontSize:7,color:C.tm,fontWeight:600,textTransform:"uppercase"}}>{s.l}</div><div style={{fontSize:22,fontWeight:900,color:C.tx,marginTop:2}}>{s.v}</div></div>)}
+      </div>
+      {urgents.length>0&&<div style={{...cd(),background:`${C.ur}06`,border:`1px solid ${C.ur}30`}}>
+        <div style={{fontSize:12,fontWeight:800,color:C.ur,marginBottom:4}}>🔥 {urgents.length} Urgent</div>
+        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{urgents.map(o=><div key={o.id} onClick={()=>setEditId(o.id)} style={{background:`${C.ur}15`,border:`1px solid ${C.ur}`,borderRadius:5,padding:"4px 8px",cursor:"pointer",fontSize:10,color:C.ur,fontWeight:700}}>🔴 {o.partName} ({o.assignedCaster})</div>)}</div>
+      </div>}
+      {planData.atRisk.length>0&&<div style={{...cd(),background:`${C.or}06`,border:`1px solid ${C.or}30`}}>
+        <div style={{fontSize:12,fontWeight:800,color:C.or,marginBottom:4}}>⚠️ {t.atRiskParts} ({planData.atRisk.length})</div>
+        {planData.atRisk.slice(0,5).map(o=><div key={o.id} style={{fontSize:10,color:C.or,padding:"2px 0"}}>{o.partName} ({o.assignedCaster}) — {o.needed} {t.shiftsNeeded}, {t.onlyHave} {o.have}</div>)}
+      </div>}
+      <div style={cd()}>
+        <div style={{fontSize:11,fontWeight:700,color:C.tx,marginBottom:8}}>{t.machineLoading}</div>
+        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{planData.loading.map(m=>{const sc=m.isDown?C.ur:m.level==="heavily"?C.gn:m.level==="balanced"?C.ac:m.level==="light"?C.bl:C.td;
+          return<div key={m.machine} style={{background:C.sf2,borderRadius:5,padding:"4px 6px",minWidth:48,textAlign:"center",border:`1px solid ${sc}25`,cursor:"pointer"}} onClick={()=>setPage("castGantt")}>
+            <div style={{fontSize:8,fontWeight:800,color:m.isDown?C.ur:C.tx}}>{m.machine}</div>
+            <div style={{fontSize:13,fontWeight:900,color:sc}}>{m.isDown?"✕":m.jobs}</div>
+            <div style={{fontSize:6,color:sc,fontWeight:600}}>{m.isDown?"DOWN":t[m.level]}</div>
+          </div>})}</div>
+      </div>
+      <div style={cd()}>
+        <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",justifyContent:"center"}}>{["casting","vibratory","machining","lab","painting","complete"].map((s,i)=>{const c=SC[s];return<div key={s} style={{display:"flex",alignItems:"center"}}><div style={{textAlign:"center",padding:"5px 10px",background:`${c}10`,border:`1px solid ${c}20`,borderRadius:6,minWidth:55}}><div style={{fontSize:8,fontWeight:700,color:c}}>{t[s]}</div><div style={{fontSize:14,fontWeight:900,color:C.tx}}>{orders.filter(o=>o.status===s).length}</div></div>{i<5&&<div style={{width:14,height:1.5,background:C.bd2}}/>}</div>})}</div>
+      </div>
+    </div>;
+
+  // ─── Planning Intelligence ────────────────────────────
+  const renderPlanning=()=>!orders.length?<UploadPrompt/>:
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <div style={{fontSize:16,fontWeight:900,color:C.ac}}>📋 {t.planTitle}</div>
+      {weekLabel&&<div style={{fontSize:10,color:C.tm}}>{t.weekOf} {weekLabel}</div>}
+
+      {/* Die Change Schedule */}
+      <div style={cd()}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <div style={{fontSize:12,fontWeight:800,color:C.tx}}>🔄 {t.dieChangeSchedule}</div>
+          <div style={{display:"flex",gap:8}}>
+            <span style={{fontSize:10,color:C.or,fontWeight:700}}>{planData.totalDC} {t.changes}</span>
+            <span style={{fontSize:10,color:C.ur,fontWeight:700}}>⏱ {planData.totalDT} {t.hrs}</span>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {MACH_LIST.filter(m=>planData.dieChanges[m]?.changes>0).map(m=>{const dc=planData.dieChanges[m];
+            return<div key={m} style={{background:C.sf2,borderRadius:6,padding:"8px 10px",minWidth:140,border:`1px solid ${dc.changes>1?C.or:C.ac}25`}}>
+              <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:13,fontWeight:900,color:C.tx}}>{m}</span>
+                <span style={{fontSize:8,fontWeight:700,color:C.or,padding:"1px 5px",borderRadius:3,background:`${C.or}15`}}>🔄 {dc.changes}</span></div>
+              <div style={{display:"flex",alignItems:"center",gap:3,marginTop:4,flexWrap:"wrap"}}>{dc.dies.map((d,i)=><span key={i} style={{display:"flex",alignItems:"center",gap:3}}>
+                <span style={{padding:"1px 5px",borderRadius:3,fontSize:9,fontWeight:700,background:`${JC[i%JC.length]}18`,color:JC[i%JC.length]}}>{d}</span>
+                {i<dc.dies.length-1&&<span style={{color:C.ac,fontSize:10}}>→</span>}</span>)}</div>
+              <div style={{fontSize:8,color:C.or,marginTop:3}}>⏱ {dc.downtime} {t.hrs}</div>
+            </div>})}
+          {planData.totalDC===0&&<div style={{fontSize:10,color:C.gn}}>✓ {t.noChanges}</div>}
+        </div>
+      </div>
+
+      {/* At-Risk Parts */}
+      {planData.atRisk.length>0&&<div style={{...cd(),border:`1px solid ${C.or}30`}}>
+        <div style={{fontSize:12,fontWeight:800,color:C.or,marginBottom:6}}>⚠️ {t.atRiskParts}</div>
+        <div style={{overflow:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr>{[t.partName,t.die,t.caster,t.qty,t.shiftsNeeded,t.onlyHave,t.risk].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
+          <tbody>{planData.atRisk.map(o=><tr key={o.id} onClick={()=>setEditId(o.id)} style={{cursor:"pointer"}}>
+            <td style={{...tdS,fontWeight:600}}>{o.partName}</td>
+            <td style={{...tdS,color:C.ac,fontSize:9}}>{o.die}</td>
+            <td style={{...tdS,fontSize:9}}>{o.assignedCaster}</td>
+            <td style={tdS}>{o.quantity?.toLocaleString()}</td>
+            <td style={{...tdS,fontWeight:700,color:C.ur}}>{o.needed}</td>
+            <td style={{...tdS,color:C.or}}>{o.have}</td>
+            <td style={tdS}><span style={{fontSize:8,fontWeight:700,color:C.ur,padding:"1px 5px",borderRadius:3,background:`${C.ur}15`}}>⚠️ {t.risk}</span></td>
+          </tr>)}</tbody>
+        </table></div>
+      </div>}
+
+      {/* Downtime Windows */}
+      {planData.downtimeW.length>0&&<div style={cd()}>
+        <div style={{fontSize:12,fontWeight:800,color:C.tx,marginBottom:6}}>🕐 {t.downtimeWindows}</div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {planData.downtimeW.map(m=><div key={m.machine} style={{background:C.sf2,borderRadius:5,padding:"6px 8px",minWidth:100}}>
+            <div style={{fontSize:12,fontWeight:800,color:C.tx}}>{m.machine}</div>
+            <div style={{display:"flex",gap:2,marginTop:3}}>{m.freeDays.map(d=><span key={d} style={{fontSize:8,padding:"1px 4px",borderRadius:3,background:`${C.gn}15`,color:C.gn,fontWeight:600}}>{weekDates[d]?.split(" ")[0]||`Day${d+1}`}</span>)}</div>
+          </div>)}
+        </div>
+      </div>}
+
+      {/* Daily Revenue */}
+      <div style={cd()}>
+        <div style={{fontSize:12,fontWeight:800,color:C.tx,marginBottom:6}}>{t.dailyBreakdown}</div>
+        <div style={{display:"flex",gap:4}}>
+          {planData.dailyRev.map((rev,i)=>{const pct=Math.min((rev/45e3)*100,100);
+            return<div key={i} style={{flex:1,textAlign:"center"}}>
+              <div style={{height:80,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
+                <div style={{background:rev>=45e3?C.gn:rev>30e3?C.ac:rev>15e3?C.or:C.td,borderRadius:"4px 4px 0 0",height:`${Math.max(pct,5)}%`,transition:"height .3s"}}/>
+              </div>
+              <div style={{fontSize:8,fontWeight:700,color:rev>=45e3?C.gn:C.tx,marginTop:2}}>${(rev/1e3).toFixed(0)}K</div>
+              <div style={{fontSize:7,color:C.tm}}>{weekDates[i]?.split(" ")[0]}</div>
+            </div>})}
+        </div>
+        <div style={{height:1,background:C.ur,marginTop:2,opacity:.3}}/>
+        <div style={{fontSize:7,color:C.ur,textAlign:"right"}}>$45K {lang==="en"?"target line":"línea meta"}</div>
+      </div>
+    </div>;
+
+  // ─── Machine Gantt ────────────────────────────────────
+  const renderCastGantt=()=>{
+    if(!orders.length)return<UploadPrompt/>;
+    const mg=MACH_LIST.map(m=>({machine:m,jobs:orders.filter(o=>o.assignedCaster===m)}));
+    return<div style={{display:"flex",flexDirection:"column",gap:10}}>
+      <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
+        <div><div style={{fontSize:14,fontWeight:900,color:C.tx}}>🏭 {lang==="en"?"Machine Schedule":"Programa Máquinas"}</div>{weekLabel&&<div style={{fontSize:8,color:C.td}}>{t.weekOf} {weekLabel}</div>}</div>
+        <button onClick={runSched} style={bt("p")} disabled={isOpt}>{isOpt?"⏳":`⚡ ${t.run}`}</button>
+      </div>
+      <div style={{background:C.sf,border:`1px solid ${C.bd}`,borderRadius:10,overflow:"auto"}}>
+        <div style={{display:"flex",position:"sticky",top:0,zIndex:4,background:"#090C11",borderBottom:`2px solid ${C.ac}20`}}>
+          <div style={{width:50,minWidth:50,padding:"6px 2px",textAlign:"center",borderRight:`2px solid ${C.bd}`}}><div style={{fontSize:7,fontWeight:800,color:C.ac}}>MCH</div></div>
+          <div style={{width:130,minWidth:130,padding:"6px 4px",borderRight:`2px solid ${C.bd}`}}><div style={{fontSize:7,fontWeight:800,color:C.ac}}>{t.partName}/{t.die}</div></div>
+          <div style={{width:42,minWidth:42,textAlign:"center",borderRight:`1px solid ${C.bd}`,padding:"6px 1px"}}><div style={{fontSize:6,fontWeight:700,color:C.tm}}>BAL</div></div>
+          {weekDates.map((d,i)=><div key={i} style={{flex:1,minWidth:70,borderRight:i<5?`1px solid ${C.bd}`:"none",textAlign:"center",padding:"2px 0"}}>
+            <div style={{fontSize:7,fontWeight:800,color:i<=1?C.ac:C.tm}}>{d}</div>
+            <div style={{display:"flex",marginTop:1}}><div style={{flex:1,fontSize:6,color:C.td}}>{t.first}</div><div style={{flex:1,fontSize:6,color:C.td}}>{t.second}</div></div>
+          </div>)}
+        </div>
+        {mg.map((g,mi)=>{
+          const isDown=g.jobs.some(j=>j.isDown);const active=g.jobs.filter(j=>!j.isDown&&(j.hasWork||j.quantity>0));
+          const worker1=workers.find(w=>w.machine===g.machine&&w.shift===1);
+          const worker2=workers.find(w=>w.machine===g.machine&&w.shift===2);
+          if(isDown&&!active.length)return<div key={g.machine} style={{display:"flex",height:34,borderBottom:`2px solid ${C.bd}`,background:`${C.ur}04`}}>
+            <div style={{width:50,minWidth:50,borderRight:`2px solid ${C.bd}`,display:"flex",alignItems:"center",justifyContent:"center",background:`${C.ur}08`}}><span style={{fontSize:13,fontWeight:900,color:C.ur}}>{g.machine}</span></div>
+            <div style={{flex:1,display:"flex",alignItems:"center",padding:"0 6px",fontSize:9,color:C.ur,fontWeight:700}}>⛔ {t.machDown}</div>
+          </div>;
+          if(!active.length)return<div key={g.machine} style={{display:"flex",height:30,borderBottom:`1px solid ${C.bd}`}}>
+            <div style={{width:50,minWidth:50,borderRight:`2px solid ${C.bd}`,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:12,fontWeight:900,color:C.td}}>{g.machine}</span></div>
+            <div style={{flex:1,display:"flex",alignItems:"center",padding:"0 6px",fontSize:8,color:C.td,fontStyle:"italic"}}>{t.noJobs}</div>
+          </div>;
+          return<div key={g.machine} style={{borderBottom:`2px solid ${C.bd}`}}>
+            {active.map((j,ji)=>{const jc=JC[(mi*3+ji)%JC.length];const prev=ji>0?active[ji-1].die:null;const dch=prev&&j.die&&prev!==j.die;
+              return<div key={j.id}>
+                {dch&&<div style={{display:"flex",height:12,background:`${C.ac}04`}}><div style={{width:50,minWidth:50,borderRight:`2px solid ${C.bd}`,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:6,color:C.ac}}>🔄</span></div><div style={{flex:1,display:"flex",alignItems:"center"}}><div style={{height:1,flex:1,background:`${C.ac}15`}}/><span style={{fontSize:5,color:C.ac,fontWeight:700,padding:"0 3px"}}>{prev}→{j.die}</span><div style={{height:1,flex:1,background:`${C.ac}15`}}/></div></div>}
+                <div style={{display:"flex",minHeight:36,background:ji%2===0?"transparent":`${C.sf2}20`,cursor:"pointer"}} onClick={()=>setEditId(j.id)}>
+                  {ji===0?<div style={{width:50,minWidth:50,borderRight:`2px solid ${C.bd}`,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",position:"relative"}}>
+                    <div style={{position:"absolute",left:0,top:0,bottom:0,width:3,background:C.gn}}/>
+                    <div style={{fontSize:14,fontWeight:900,color:C.tx}}>{g.machine}</div>
+                    <div style={{fontSize:6,color:C.gn}}>{active.length} {t.jobs}</div>
+                    {(worker1?.name||worker2?.name)&&<div style={{fontSize:5,color:C.tm,marginTop:1}}>{worker1?.name||"?"}/{worker2?.name||"?"}</div>}
+                  </div>:<div style={{width:50,minWidth:50,borderRight:`2px solid ${C.bd}`,position:"relative"}}><div style={{position:"absolute",left:23,top:0,bottom:0,width:1,background:C.bd2}}/></div>}
+                  <div style={{width:130,minWidth:130,padding:"3px 4px",borderRight:`2px solid ${C.bd}`,display:"flex",flexDirection:"column",justifyContent:"center"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:3}}><div style={{width:3,height:18,borderRadius:2,background:jc}}/><div><div style={{fontSize:9,fontWeight:700,color:C.tx,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:108}}>{j.partName}</div>{j.die&&<div style={{fontSize:7,color:C.ac}}>🔧 {j.die}</div>}</div></div>
+                  </div>
+                  <div style={{width:42,minWidth:42,borderRight:`1px solid ${C.bd}`,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:9,fontWeight:800,color:j.quantity>3e3?C.or:C.tx}}>{j.quantity>999?`${(j.quantity/1e3).toFixed(1)}K`:j.quantity}</span></div>
+                  {(j.shifts||[]).map((sh,di)=><div key={di} style={{flex:1,minWidth:70,borderRight:di<5?`1px solid ${C.bd}`:"none",display:"flex",background:di<=1?`${C.ac}02`:"transparent",position:"relative"}}>
+                    {[0,1].map(si=><div key={si} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:"2px 1px",borderRight:si===0?`1px dotted ${C.bd}08`:"none"}}>
+                      <ShiftCell value={sh[si]} color={jc} onChange={nv=>updateShift(j.id,di,si,nv)}/>
+                    </div>)}
+                    {di<5&&(sh[0]>0||sh[1]>0)&&(j.shifts?.[di+1]||[0,0]).some(v=>v>0)&&<div style={{position:"absolute",right:-2,top:"50%",width:4,height:1,background:`${jc}35`,zIndex:2}}/>}
+                  </div>)}
+                </div>
+              </div>})}
+          </div>})}
+      </div>
+    </div>;
+  };
+
+  // ─── Orders ───────────────────────────────────────────
+  const renderOrders=()=><div style={{display:"flex",flexDirection:"column",gap:8}}>
+    <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
+      <input placeholder={t.search} value={search} onChange={e=>setSearch(e.target.value)} style={{...inp,maxWidth:200}}/>
+      <div style={{display:"flex",gap:3}}><button onClick={()=>setShowAdd(true)} style={bt("p")}>{t.add}</button><button onClick={runSched} style={bt("o")} disabled={isOpt}>{isOpt?"⏳":`⚡ ${t.run}`}</button></div>
+    </div>
+    {showAdd&&<div style={{...cd(),background:C.sf2,border:`2px solid ${C.ac}`}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
+        {[{l:t.partName,k:"partName"},{l:t.die,k:"die"},{l:t.qty,k:"quantity",ty:"number"},{l:t.profitU,k:"profitPerUnit",ty:"number"}].map(f=><div key={f.k}><label style={{fontSize:7,color:C.tm}}>{f.l}</label><input style={inp} type={f.ty||"text"} value={nw[f.k]} onChange={e=>setNw({...nw,[f.k]:f.ty==="number"?parseFloat(e.target.value)||0:e.target.value})}/></div>)}
+        <div><label style={{fontSize:7,color:C.tm}}>{t.caster}</label><select style={inp} value={nw.assignedCaster} onChange={e=>setNw({...nw,assignedCaster:e.target.value})}>{MACH_LIST.map(m=><option key={m} value={m}>{m}</option>)}</select></div>
+      </div>
+      <div style={{display:"flex",gap:3,marginTop:5}}><button onClick={addOrd} style={bt("p")}>{t.save}</button><button onClick={()=>setShowAdd(false)} style={bt("o")}>{t.cancel}</button></div>
+    </div>}
+    <div style={{...cd({padding:0}),overflow:"auto",maxHeight:400}}>
+      <table style={{width:"100%",borderCollapse:"collapse",minWidth:700}}>
+        <thead><tr>{[t.priority,t.partName,t.die,t.qty,t.profitU,t.status,t.caster,""].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
+        <tbody>{filtered.filter(o=>!o.isDown).map(o=>{const isU=o.priority==="urgent";
+          return<tr key={o.id} style={{background:isU?`${C.ur}05`:"transparent"}}>
+            <td style={tdS}><EC value={o.priority} onChange={v=>upd(o.id,{priority:v})} options={priOpts}/></td>
+            <td style={{...tdS,fontWeight:600}}><EC value={o.partName} onChange={v=>upd(o.id,{partName:v})} color={isU?C.ur:C.tx}/></td>
+            <td style={{...tdS,color:C.ac,fontSize:8}}>{o.die||"—"}</td>
+            <td style={tdS}><EC value={o.quantity} onChange={v=>upd(o.id,{quantity:v})} type="number"/></td>
+            <td style={tdS}><EC value={o.profitPerUnit} onChange={v=>upd(o.id,{profitPerUnit:v})} type="number" color={C.gn}/></td>
+            <td style={tdS}><EC value={o.status} onChange={v=>upd(o.id,{status:v})} options={statusOpts}/></td>
+            <td style={{...tdS,fontSize:8}}><EC value={o.assignedCaster||""} onChange={v=>upd(o.id,{assignedCaster:v})} options={machOpts}/></td>
+            <td style={tdS}><div style={{display:"flex",gap:2}}>
+              <button onClick={()=>setEditId(o.id)} style={{...bt(),padding:"1px 3px",fontSize:7}}>✏️</button>
+              <button onClick={()=>togUrg(o.id)} style={{...bt(),padding:"1px 3px",fontSize:7,background:isU?`${C.ur}20`:"transparent"}}>🔥</button>
+              <button onClick={()=>setDelId(o.id)} style={{...bt(),padding:"1px 3px",fontSize:7,color:C.ur}}>✕</button>
+            </div></td>
+          </tr>})}</tbody>
+      </table>
+    </div>
+  </div>;
+
+  // ─── $45K Target ──────────────────────────────────────
+  const DT=45e3;
+  const renderTargets=()=>{
+    const active=orders.filter(o=>!o.isDown&&o.quantity>0&&o.hasWork);
+    const pts=active.map(o=>{const dp=Math.ceil(o.quantity/5);const dr=dp*o.profitPerUnit;const ap=actProd[o.id]||0;return{...o,dp,dr,ap,ar:ap*o.profitPerUnit}}).sort((a,b)=>b.dr-a.dr);
+    const tP=pts.reduce((a,p)=>a+p.dr,0);const tA=pts.reduce((a,p)=>a+p.ar,0);
+    const wk=[];const now=new Date();for(let i=6;i>=0;i--){const d=new Date(now);d.setDate(d.getDate()-i);wk.push({l:d.toLocaleDateString(lang==="es"?"es":"en",{weekday:"short"}),a:i===0?tA:(28e3+Math.random()*24e3),t:DT})}
+    if(!orders.length)return<UploadPrompt/>;
+    return<div style={{display:"flex",flexDirection:"column",gap:12}}>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <div style={{...cd(),borderLeft:`3px solid ${C.ac}`,flex:1,minWidth:130}}><div style={{fontSize:7,color:C.tm,textTransform:"uppercase"}}>{t.target}</div><div style={{fontSize:24,fontWeight:900,color:C.ac}}>$45,000</div></div>
+        <div style={{...cd(),borderLeft:`3px solid ${tP>=DT?C.gn:C.ur}`,flex:1,minWidth:130}}><div style={{fontSize:7,color:C.tm,textTransform:"uppercase"}}>{t.projected}</div><div style={{fontSize:24,fontWeight:900,color:tP>=DT?C.gn:C.ur}}>${(tP/1e3).toFixed(1)}K</div><div style={{fontSize:8,color:tP>=DT?C.gn:C.ur}}>{tP>=DT?`✓ ${t.targetMet}`:`↓ ${t.below}`}</div></div>
+        <div style={{...cd(),flex:1,minWidth:130}}><div style={{fontSize:7,color:C.tm,textTransform:"uppercase"}}>{t.today}</div><div style={{fontSize:24,fontWeight:900,color:C.tx}}>${(tA/1e3).toFixed(1)}K</div></div>
+      </div>
+      <div style={cd()}><div style={{fontSize:11,fontWeight:700,color:C.tx,marginBottom:4}}>{t.weekTrend}</div><div style={{overflowX:"auto",display:"flex",justifyContent:"center"}}><Chart data={wk}/></div></div>
+      <div style={{...cd(),border:`1px solid ${C.ac}20`}}>
+        <div style={{fontSize:12,fontWeight:900,color:C.ac,marginBottom:4}}>📋 {t.guide}</div>
+        <div style={{overflow:"auto",maxHeight:280}}>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr>{[t.partName,t.die,t.dailyPcs,t.actual,t.revDay,t.pctTarget].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
+            <tbody>{pts.slice(0,12).map((p,i)=><tr key={p.id}>
+              <td style={{...tdS,fontWeight:600}}><div style={{display:"flex",alignItems:"center",gap:2}}><div style={{width:3,height:14,borderRadius:2,background:JC[i%JC.length]}}/>{p.partName}</div></td>
+              <td style={{...tdS,fontSize:7,color:C.ac}}>{p.die||"—"}</td>
+              <td style={tdS}><span style={{fontSize:12,fontWeight:900}}>{p.dp.toLocaleString()}</span></td>
+              <td style={tdS}><input type="number" value={actProd[p.id]||""} placeholder="0" onChange={e=>setActProd(pr=>({...pr,[p.id]:parseInt(e.target.value)||0}))} style={{background:C.sf3,color:C.tx,border:`1px solid ${C.bd}`,borderRadius:3,padding:"1px 3px",fontSize:10,fontWeight:700,width:48,outline:"none",textAlign:"center"}}/></td>
+              <td style={{...tdS,fontWeight:700,color:C.gn,fontSize:10}}>${p.dr.toFixed(0)}</td>
+              <td style={tdS}><div style={{width:26,height:3,background:C.sf3,borderRadius:2,overflow:"hidden"}}><div style={{width:`${Math.min((p.dr/DT)*100,100)}%`,height:"100%",background:JC[i%JC.length]}}/></div></td>
+            </tr>)}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>};
+
+  // ─── People ───────────────────────────────────────────
+  const renderPeople=()=><div style={{display:"flex",flexDirection:"column",gap:12}}>
+    <div style={{fontSize:14,fontWeight:900,color:C.tx}}>👷 {t.workers}</div>
+    <div style={{...cd({padding:0}),overflow:"auto"}}>
+      <table style={{width:"100%",borderCollapse:"collapse"}}>
+        <thead><tr>{[t.workerName,t.workerMachine,t.workerShift,t.workerLang,t.workerRole,""].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
+        <tbody>{workers.map((w,i)=><tr key={w.id}>
+          <td style={tdS}><input value={w.name} placeholder={lang==="en"?"Enter name":"Nombre"} onChange={e=>{const nw=[...workers];nw[i]={...w,name:e.target.value};setWorkers(nw)}} style={{...inp,background:"transparent",border:"none",borderBottom:`1px dashed ${C.bd2}`,borderRadius:0,padding:"2px 0"}}/></td>
+          <td style={tdS}><select value={w.machine} onChange={e=>{const nw=[...workers];nw[i]={...w,machine:e.target.value};setWorkers(nw)}} style={{background:C.sf3,color:C.tx,border:`1px solid ${C.bd}`,borderRadius:4,padding:"2px",fontSize:9,cursor:"pointer"}}>{MACH_LIST.map(m=><option key={m} value={m}>{m}</option>)}</select></td>
+          <td style={tdS}><select value={w.shift} onChange={e=>{const nw=[...workers];nw[i]={...w,shift:parseInt(e.target.value)};setWorkers(nw)}} style={{background:C.sf3,color:C.tx,border:`1px solid ${C.bd}`,borderRadius:4,padding:"2px",fontSize:9,cursor:"pointer"}}>{shiftOpts.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}</select></td>
+          <td style={tdS}><select value={w.lang} onChange={e=>{const nw=[...workers];nw[i]={...w,lang:e.target.value};setWorkers(nw)}} style={{background:C.sf3,color:C.tx,border:`1px solid ${C.bd}`,borderRadius:4,padding:"2px",fontSize:9,cursor:"pointer"}}>{langOpts.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}</select></td>
+          <td style={tdS}><select value={w.role} onChange={e=>{const nw=[...workers];nw[i]={...w,role:e.target.value};setWorkers(nw)}} style={{background:C.sf3,color:C.tx,border:`1px solid ${C.bd}`,borderRadius:4,padding:"2px",fontSize:9,cursor:"pointer"}}>{roleOpts.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}</select></td>
+          <td style={tdS}><button onClick={()=>setWorkers(p=>p.filter((_,j)=>j!==i))} style={{...bt(),padding:"1px 3px",fontSize:7,color:C.ur}}>✕</button></td>
+        </tr>)}</tbody>
+      </table>
+    </div>
+    <button onClick={()=>setWorkers(p=>[...p,{id:`W${Date.now()}`,name:"",machine:"M4",shift:1,lang:"es",role:"operator"}])} style={bt("p")}>{t.addWorker}</button>
+
+    <div style={{fontSize:14,fontWeight:900,color:C.tx,marginTop:8}}>🧑‍💼 {t.supervisors}</div>
+    <div style={{...cd({padding:0}),overflow:"auto"}}>
+      <table style={{width:"100%",borderCollapse:"collapse"}}>
+        <thead><tr>{[t.workerName,t.workerMachine+"s",t.workerShift,""].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
+        <tbody>{supers.map((s,i)=><tr key={s.id}>
+          <td style={tdS}><input value={s.name} placeholder={lang==="en"?"Enter name":"Nombre"} onChange={e=>{const ns=[...supers];ns[i]={...s,name:e.target.value};setSupers(ns)}} style={{...inp,background:"transparent",border:"none",borderBottom:`1px dashed ${C.bd2}`,borderRadius:0,padding:"2px 0"}}/></td>
+          <td style={{...tdS,fontSize:8}}>{s.machines?.join(", ")||"—"}</td>
+          <td style={tdS}><select value={s.shift} onChange={e=>{const ns=[...supers];ns[i]={...s,shift:parseInt(e.target.value)};setSupers(ns)}} style={{background:C.sf3,color:C.tx,border:`1px solid ${C.bd}`,borderRadius:4,padding:"2px",fontSize:9,cursor:"pointer"}}>{shiftOpts.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}</select></td>
+          <td style={tdS}><button onClick={()=>setSupers(p=>p.filter((_,j)=>j!==i))} style={{...bt(),padding:"1px 3px",fontSize:7,color:C.ur}}>✕</button></td>
+        </tr>)}</tbody>
+      </table>
+    </div>
+    <button onClick={()=>setSupers(p=>[...p,{id:`S${Date.now()}`,name:"",machines:MACH_LIST,shift:1,role:"supervisor"}])} style={bt("p")}>{t.addSuper}</button>
+  </div>;
+
+  // ─── Machines ─────────────────────────────────────────
+  const renderMach=()=><div style={{display:"flex",flexDirection:"column",gap:10}}>
+    <div style={{fontSize:13,fontWeight:800,color:C.tx}}>Casting (M2–M14)</div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(145px,1fr))",gap:6}}>
+      {MACH_LIST.map(m=>{const info=MI[m];const asgn=orders.filter(o=>o.assignedCaster===m&&!o.isDown);const isDown=orders.some(o=>o.assignedCaster===m&&o.isDown);const w1=workers.find(w=>w.machine===m&&w.shift===1);const w2=workers.find(w=>w.machine===m&&w.shift===2);
+        return<div key={m} style={{...cd({padding:10}),border:`1px solid ${isDown?C.ur:asgn.length>0?C.gn:C.bd}20`,position:"relative",overflow:"hidden",cursor:"pointer"}} onClick={()=>setPage("castGantt")}>
+          <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:isDown?C.ur:asgn.length>0?C.gn:C.td}}/>
+          <div style={{fontSize:14,fontWeight:900,color:isDown?C.ur:C.tx}}>{m}</div>
+          <div style={{fontSize:8,color:C.tm}}>{t[info?.type]} {info?.ton>0?`• ${info.ton}T`:""}</div>
+          {asgn.length>0&&<div style={{fontSize:7,color:C.gn,marginTop:3}}>{asgn.length} {t.jobs} • {asgn.reduce((a,j)=>a+j.quantity,0).toLocaleString()} {t.pcs}</div>}
+          {isDown&&<div style={{fontSize:8,color:C.ur,fontWeight:700,marginTop:3}}>{t.machDown}</div>}
+          {(w1?.name||w2?.name)&&<div style={{fontSize:7,color:C.tm,marginTop:2}}>{t.first}: {w1?.name||"—"} | {t.second}: {w2?.name||"—"}</div>}
+        </div>})}
+    </div>
+    <div style={{fontSize:13,fontWeight:800,color:C.tx,marginTop:6}}>Haas & Secondary</div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(145px,1fr))",gap:6}}>
+      {HAAS.map(m=><div key={m} style={{...cd({padding:10})}}><div style={{fontSize:12,fontWeight:800,color:C.tx}}>{m}</div><div style={{fontSize:8,color:C.tm}}>{m.includes("Haas")?"Haas CNC":"Hand Dipping"}</div></div>)}
+    </div>
+  </div>;
+
+  // ─── Painting / Scheduling (compact) ──────────────────
+  const renderPaint=()=>{const po=orders.filter(o=>o.needsPaint&&!o.isDown);return<div style={{display:"flex",flexDirection:"column",gap:8}}>
+    <div style={{...cd(),borderLeft:`3px solid ${C.cy}`}}><div style={{fontSize:12,fontWeight:800}}>{t.paintDept}</div><div style={{fontSize:8,color:C.tm}}>{po.length} parts</div></div>
+    <div style={{...cd({padding:0}),overflow:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr>{[t.partName,t.die,t.qty,t.status,t.caster].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
+      <tbody>{po.map(o=><tr key={o.id}><td style={{...tdS,fontWeight:600}}>{o.partName}</td><td style={{...tdS,color:C.ac,fontSize:8}}>{o.die}</td><td style={tdS}>{o.quantity?.toLocaleString()}</td><td style={tdS}><EC value={o.status} onChange={v=>upd(o.id,{status:v})} options={statusOpts}/></td><td style={{...tdS,fontSize:8}}>{o.assignedCaster}</td></tr>)}</tbody></table></div>
+  </div>};
+
+  const renderSched=()=><div style={{display:"flex",flexDirection:"column",gap:10}}>
+    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}><button onClick={runSched} style={bt("p")} disabled={isOpt}>{isOpt?"⏳":`⚡ ${t.run}`}</button></div>
+    <div style={cd()}><div style={{fontSize:11,fontWeight:700,color:C.tx,marginBottom:6}}>Die Batch Groups</div>
+      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{[...new Set(orders.map(o=>o.die).filter(Boolean))].map(die=>{const b=orders.filter(o=>o.die===die);
+        return<div key={die} style={{background:C.sf2,borderRadius:5,padding:6,minWidth:100,border:`1px solid ${C.bd}`}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.ac}}>{die}</div><div style={{fontSize:8,color:C.tm}}>{b.length} parts</div>
+          {b.slice(0,3).map(o=><div key={o.id} onClick={()=>setEditId(o.id)} style={{fontSize:7,color:C.tx,cursor:"pointer",marginTop:1}}>{o.partName}</div>)}
+        </div>})}</div>
+    </div>
+  </div>;
+
+  const pages={dashboard:renderDash,planning:renderPlanning,castGantt:renderCastGantt,targets:renderTargets,orders:renderOrders,people:renderPeople,machines:renderMach,scheduling:renderSched,painting:renderPaint};
+
+  // ═══ RENDER ═══════════════════════════════════════════
+  return(
+    <div style={{minHeight:"100vh",background:C.bg,color:C.tx,fontFamily:"'Segoe UI',-apple-system,sans-serif"}}>
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-track{background:${C.sf}}::-webkit-scrollbar-thumb{background:${C.bd2};border-radius:3px}select option{background:${C.sf2};color:${C.tx}}`}</style>
+
+      {/* Top Bar */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 14px",background:C.sf,borderBottom:`1px solid ${C.bd}`,position:"sticky",top:0,zIndex:100}}>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <div style={{width:26,height:26,borderRadius:5,background:`linear-gradient(135deg,${C.ac},${C.or})`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:9,color:"#000"}}>CF</div>
+          <div><div style={{fontSize:12,fontWeight:800}}>{t.app}</div>{weekLabel&&<div style={{fontSize:7,color:C.ac}}>{t.weekOf} {weekLabel}</div>}</div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:5}}>
+          <div style={{position:"relative"}}>
+            <button onClick={()=>setShowNotif(!showNotif)} style={{...bt(),padding:3,position:"relative"}}>⚠️{urgents.length>0&&<span style={{position:"absolute",top:0,right:0,width:5,height:5,borderRadius:"50%",background:C.ur,animation:"pulse 1s infinite"}}/>}</button>
+            {showNotif&&<div style={{position:"absolute",top:32,right:0,width:220,...cd(),boxShadow:"0 6px 20px rgba(0,0,0,.5)",zIndex:200}}>
+              {urgents.length===0?<div style={{fontSize:8,color:C.tm}}>{t.noUrgent}</div>:urgents.map(o=><div key={o.id} onClick={()=>{setEditId(o.id);setShowNotif(false)}} style={{padding:"3px 0",fontSize:8,color:C.ur,cursor:"pointer",borderBottom:`1px solid ${C.bd}`}}>🔴 {o.partName}</div>)}
+            </div>}
+          </div>
+          <button onClick={()=>fileRef.current?.click()} style={{...bt("p"),padding:"3px 7px",fontSize:8}}>{isLoading?"⏳":"📂"} {t.upload}</button>
+          <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={e=>{handleFile(e.target.files[0]);e.target.value=""}}/>
+          <button onClick={()=>setLang(l=>l==="en"?"es":"en")} style={{...bt("o"),padding:"3px 6px",fontSize:8}}>{lang==="en"?"🇺🇸":"🇲🇽"}</button>
+        </div>
+      </div>
+
+      {/* Nav */}
+      <div style={{display:"flex",gap:1,padding:"4px 14px",background:C.sf,borderBottom:`1px solid ${C.bd}`,overflowX:"auto"}}>
+        {[{id:"dashboard",ic:"📊"},{id:"planning",ic:"📋"},{id:"castGantt",ic:"🏭"},{id:"targets",ic:"🎯"},{id:"orders",ic:"📦"},{id:"people",ic:"👷"},{id:"machines",ic:"⚙️"},{id:"scheduling",ic:"🔄"},{id:"painting",ic:"🎨"}].map(n=>
+          <button key={n.id} onClick={()=>setPage(n.id)} style={pill(page===n.id)}><span style={{fontSize:11}}>{n.ic}</span>{t[n.id]||n.id}</button>)}
+      </div>
+
+      <div style={{padding:"12px 14px",maxWidth:1400,margin:"0 auto"}}>{(pages[page]||renderDash)()}</div>
+
+      {/* Edit Modal */}
+      <Modal open={!!editId&&!!eo} onClose={()=>setEditId(null)} title={eo?`${t.edit}: ${eo.partName}`:""} ch={eo?<div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+          {[{l:t.partName,k:"partName"},{l:t.die,k:"die"},{l:t.qty,k:"quantity",ty:"number"},{l:t.profitU,k:"profitPerUnit",ty:"number"},{l:t.shopOrder,k:"shopOrder"}].map(f=>
+            <div key={f.k}><label style={{fontSize:7,color:C.tm}}>{f.l}</label><input style={inp} type={f.ty||"text"} value={eo[f.k]||""} onChange={e=>upd(eo.id,{[f.k]:f.ty==="number"?parseFloat(e.target.value)||0:e.target.value})}/></div>)}
+          <div><label style={{fontSize:7,color:C.tm}}>{t.priority}</label><select style={inp} value={eo.priority} onChange={e=>upd(eo.id,{priority:e.target.value})}>{priOpts.map(x=><option key={x.v} value={x.v}>{x.l}</option>)}</select></div>
+          <div><label style={{fontSize:7,color:C.tm}}>{t.status}</label><select style={inp} value={eo.status} onChange={e=>upd(eo.id,{status:e.target.value})}>{statusOpts.map(x=><option key={x.v} value={x.v}>{x.l}</option>)}</select></div>
+          <div><label style={{fontSize:7,color:C.tm}}>{t.caster}</label><select style={inp} value={eo.assignedCaster||""} onChange={e=>upd(eo.id,{assignedCaster:e.target.value})}>{machOpts.map(x=><option key={x.v} value={x.v}>{x.l}</option>)}</select></div>
+        </div>
+        <textarea value={eo.notes||""} onChange={e=>upd(eo.id,{notes:e.target.value})} placeholder={t.notes} rows={2} style={{...inp,marginTop:6,resize:"vertical"}}/>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:4,marginTop:8}}>
+          <button onClick={()=>{dup(eo.id);setEditId(null)}} style={bt("o")}>📋</button>
+          <button onClick={()=>{setDelId(eo.id);setEditId(null)}} style={bt("x")}>🗑</button>
+          <button onClick={()=>{setEditId(null);flash(t.saved)}} style={bt("p")}>✓ {t.save}</button>
+        </div>
+      </div>:null}/>
+
+      <Modal open={!!delId} onClose={()=>setDelId(null)} title={t.confirmDel} ch={
+        <div style={{display:"flex",gap:4,justifyContent:"flex-end",marginTop:4}}>
+          <button onClick={()=>setDelId(null)} style={bt("o")}>{t.no}</button>
+          <button onClick={()=>del(delId)} style={bt("x")}>{t.yes}</button>
+        </div>
+      }/>
+
+      {toast&&<div style={{position:"fixed",bottom:14,right:14,zIndex:2e3,background:C.gn,color:"#fff",padding:"6px 14px",borderRadius:6,fontWeight:700,fontSize:10}}>{toast}</div>}
+    </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <>
+      <Head>
+        <title>CastFlow — NIDC</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+      </Head>
+      <CastFlow />
+    </>
+  );
+}
