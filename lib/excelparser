@@ -1,0 +1,87 @@
+import * as XLSX from "xlsx";
+
+/**
+ * Parse NIDC Production Schedule Excel file
+ * Reads "Casting Schedule" sheet: machines M2-M14, parts, dies, balances, shifts
+ * Returns { weekDates, jobs }
+ */
+export function parseNIDCSchedule(arrayBuffer) {
+  const wb = XLSX.read(arrayBuffer, { type: "array", cellDates: true });
+  
+  // Find the casting schedule sheet
+  const sheetName = wb.SheetNames.find(s => 
+    s.toLowerCase().includes("casting sched")
+  ) || wb.SheetNames[0];
+  
+  const raw = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: "" });
+
+  // Extract week dates from row 1 (columns 8, 10, 12, 14, 16, 18)
+  const dateRow = raw[1] || [];
+  const weekDates = [];
+  for (let c = 8; c <= 18; c += 2) {
+    const v = dateRow[c];
+    if (v instanceof Date) {
+      weekDates.push({
+        label: v.toLocaleDateString("en-US", { weekday: "short", month: "numeric", day: "numeric" }),
+        date: v.toISOString().split("T")[0],
+      });
+    } else if (typeof v === "string" && v.includes("202")) {
+      const d = new Date(v);
+      weekDates.push({
+        label: d.toLocaleDateString("en-US", { weekday: "short", month: "numeric", day: "numeric" }),
+        date: d.toISOString().split("T")[0],
+      });
+    } else {
+      weekDates.push({ label: `Day ${weekDates.length + 1}`, date: "" });
+    }
+  }
+
+  // Parse jobs starting from row 3
+  const jobs = [];
+  let currentMachine = "";
+  
+  for (let i = 3; i < raw.length; i++) {
+    const r = raw[i];
+    if (!r || r.length < 6) continue;
+
+    const machCell = String(r[0] || "").trim();
+    if (/^M\d+/.test(machCell)) currentMachine = machCell;
+    if (!currentMachine) continue;
+
+    const part = String(r[4] || "").trim();
+    const shopOrder = String(r[3] || "").trim();
+    const die = String(r[5] || "").trim();
+    const balance = parseInt(r[6]) || 0;
+
+    // Skip empty rows
+    if ((!part || part === "0") && balance === 0) continue;
+    if (part === "0" && die === "0" && balance === 0) continue;
+
+    // Read shift data: 6 days × 2 shifts
+    const shifts = [];
+    for (let d = 0; d < 6; d++) {
+      shifts.push([
+        parseInt(r[8 + d * 2]) || 0,
+        parseInt(r[9 + d * 2]) || 0,
+      ]);
+    }
+
+    const isDown = part.toLowerCase().includes("machine down");
+    const hasWork = shifts.some(s => s[0] > 0 || s[1] > 0);
+    
+    if (!isDown && !hasWork && balance === 0) continue;
+
+    jobs.push({
+      machine: currentMachine,
+      shopOrder: shopOrder !== "0" ? shopOrder : "",
+      part,
+      die: die !== "0" ? die : "",
+      balance,
+      shifts,
+      isDown,
+      hasWork,
+    });
+  }
+
+  return { weekDates, jobs };
+}
