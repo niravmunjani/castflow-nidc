@@ -1,4 +1,3 @@
-"use client";
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { parseNIDCSchedule } from "@/lib/excelParser";
 import { MACHINES, MACHINE_INFO, COLORS as C, JOB_COLORS as JC, STATUS_COLORS as SC, TRANSLATIONS as T, DAILY_TARGET } from "@/lib/constants";
