@@ -1,49 +1,8 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import Head from "next/head";
+import * as XLSX from "xlsx";
 
-
-/* ════════════════════════════════════════════════════════════
-   CASTFLOW v2 — NIDC Weekly Production Planning System
-   • Upload Excel each week → entire UI updates
-   • Workers, Supervisors, Machines — all editable
-   • Planning intelligence: die changes, at-risk, $45K target
-   • Zero external dependencies • Bilingual EN/ES
-   • Persistent storage (survives page refresh)
-   ════════════════════════════════════════════════════════════ */
-
-// ═══ BUILT-IN XLSX PARSER (no libraries needed) ═══
-async function parseXLSX(buf){
-  const files=await unzipBuf(buf);
-  const ss=parseSST(files["xl/sharedStrings.xml"]||"");
-  const wb=parseWB(files["xl/workbook.xml"]||"");
-  const sheets={};
-  for(const s of wb){const xml=files[`xl/worksheets/sheet${s.id}.xml`]||"";sheets[s.name]=parseSht(xml,ss)}
-  return{SheetNames:wb.map(s=>s.name),Sheets:sheets};
-}
-async function unzipBuf(buf){
-  const f={};const v=new DataView(buf);let o=0;
-  while(o<buf.byteLength-4){
-    if(v.getUint32(o,true)!==0x04034b50)break;
-    const cm=v.getUint16(o+8,true),cs=v.getUint32(o+18,true),nl=v.getUint16(o+26,true),el=v.getUint16(o+28,true);
-    const nm=new TextDecoder().decode(new Uint8Array(buf,o+30,nl));const ds=o+30+nl+el;const raw=new Uint8Array(buf,ds,cs);
-    if(cm===0)f[nm]=new TextDecoder().decode(raw);
-    else if(cm===8){try{const d=new DecompressionStream("deflate-raw");const w=d.writable.getWriter();w.write(raw);w.close();
-      const r=d.readable.getReader();const ch=[];let done=false;while(!done){const{done:d2,value:v2}=await r.read();if(d2)done=true;else ch.push(v2)}
-      const tot=ch.reduce((a,c)=>a+c.length,0);const res=new Uint8Array(tot);let p=0;for(const c of ch){res.set(c,p);p+=c.length}
-      f[nm]=new TextDecoder().decode(res)}catch{f[nm]=""}}
-    o=ds+cs}return f}
-function parseSST(x){const s=[];const re=/<t[^>]*>([\s\S]*?)<\/t>/g;let m;while((m=re.exec(x)))s.push(m[1].replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">"));return s}
-function parseWB(x){const s=[];const re=/<sheet\s+name="([^"]+)"[^>]*sheetId="(\d+)"[^>]*r:id="rId(\d+)"/g;let m;while((m=re.exec(x)))s.push({name:m[1],id:m[3]});
-  if(!s.length){const r2=/<sheet[^>]*name="([^"]+)"[^>]*/g;let i=1;while((m=r2.exec(x)))s.push({name:m[1],id:String(i++)})}return s}
-function parseSht(x,ss){const rows=[];const rr=/<row[^>]*>([\s\S]*?)<\/row>/g;let rm;
-  while((rm=rr.exec(x))){const cr=/<c\s+r="([A-Z]+)(\d+)"[^>]*(?:t="([^"]*)")?[^>]*>(?:[\s\S]*?<v>([\s\S]*?)<\/v>)?[\s\S]*?<\/c>/g;let cm;const row={};
-    while((cm=cr.exec(rm[1]))){const col=colI(cm[1]);const ty=cm[3];let val=cm[4]||"";
-      if(ty==="s"&&ss[parseInt(val)]!==undefined)val=ss[parseInt(val)];else if(!ty||ty==="n"){const n=parseFloat(val);if(!isNaN(n))val=n}row[col]=val}rows.push(row)}
-  let mc=0;rows.forEach(r=>Object.keys(r).forEach(c=>{if(parseInt(c)>mc)mc=parseInt(c)}));
-  return rows.map(r=>{const a=[];for(let i=0;i<=mc;i++)a.push(r[i]!==undefined?r[i]:"");return a})}
-function colI(c){let i=0;for(let j=0;j<c.length;j++)i=i*26+c.charCodeAt(j)-64;return i-1}
-
-// ═══ COLORS ═══
+function CastFlow() {
 const C={bg:"#06080C",sf:"#0E1218",sf2:"#151B24",sf3:"#1C2433",bd:"#232D3B",bd2:"#2E3A4A",tx:"#E4E9F1",tm:"#7E8CA0",td:"#4A5568",ac:"#F7B731",ur:"#EF4444",gn:"#10B981",bl:"#3B82F6",pu:"#8B5CF6",or:"#F97316",cy:"#06B6D4"};
 const JC=["#3B82F6","#F59E0B","#10B981","#8B5CF6","#06B6D4","#F97316","#EC4899","#14B8A6","#6366F1","#F43F5E","#22D3EE","#A855F7"];
 const SC={pending:C.td,casting:C.or,machining:C.bl,vibratory:C.pu,painting:C.cy,lab:"#A78BFA",complete:C.gn};
@@ -189,7 +148,6 @@ const Chart=({data,w:W=600,h:H=180})=>{
 // ═══════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════
-function CastFlow(){
   const[lang,setLang]=useState("en");
   const[page,setPage]=useState("dashboard");
   const[orders,setOrders]=useState([]);
@@ -223,9 +181,9 @@ function CastFlow(){
   const handleFile=useCallback(async f=>{
     if(!f)return;setFileName(f.name);setIsLoading(true);
     try{
-      const buf=await f.arrayBuffer();const wb=await parseXLSX(buf);
+      const buf=await f.arrayBuffer();const wb=XLSX.read(buf,{type:"array",cellDates:true});
       const sn=wb.SheetNames.find(s=>s.toLowerCase().includes("casting sched"))||wb.SheetNames[0];
-      const raw=wb.Sheets[sn]||[];
+      const raw=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:""});
       const dr=raw[1]||[];const wd=[];
       for(let c=8;c<=18;c+=2){const v=dr[c];
         if(typeof v==="number"&&v>40000){const d=new Date((v-25569)*864e5);wd.push(d.toLocaleDateString("en-US",{weekday:"short",month:"numeric",day:"numeric"}))}
