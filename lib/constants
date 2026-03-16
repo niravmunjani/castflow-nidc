@@ -1,0 +1,135 @@
+// ─── Machine Definitions ───────────────────────────────
+export const MACHINES = [
+  { id: "M2",  type: "zinc",    ton: 0,   dch: 4, cat: "cast" },
+  { id: "M3",  type: "zinc",    ton: 0,   dch: 4, cat: "cast" },
+  { id: "M4",  type: "al400",   ton: 400, dch: 4, cat: "cast" },
+  { id: "M5",  type: "al400",   ton: 400, dch: 4, cat: "cast" },
+  { id: "M6",  type: "al400",   ton: 400, dch: 4, cat: "cast" },
+  { id: "M7",  type: "al400",   ton: 400, dch: 4, cat: "cast" },
+  { id: "M8",  type: "al400",   ton: 400, dch: 4, cat: "cast" },
+  { id: "M9",  type: "al400",   ton: 400, dch: 4, cat: "cast" },
+  { id: "M10", type: "al400",   ton: 400, dch: 4, cat: "cast" },
+  { id: "M11", type: "autoFan", ton: 400, dch: 5, cat: "cast" },
+  { id: "M12", type: "al600",   ton: 600, dch: 5, cat: "cast" },
+  { id: "M13", type: "al600",   ton: 600, dch: 5, cat: "cast" },
+  { id: "M14", type: "al800",   ton: 800, dch: 5, cat: "cast" },
+];
+
+export const HAAS_MACHINES = [
+  { id: "H1", type: "haas", shr: 2.5 },
+  { id: "H2", type: "haas", shr: 2.5 },
+  { id: "H3", type: "haas", shr: 2.5 },
+  { id: "H4", type: "haas", shr: 2.5 },
+  { id: "H5", type: "haas", shr: 2.5 },
+  { id: "HD", type: "handDip", shr: 0.5 },
+];
+
+export const MACHINE_INFO = Object.fromEntries(
+  MACHINES.map(m => [m.id, m])
+);
+
+// ─── Colors ────────────────────────────────────────────
+export const COLORS = {
+  bg: "#06080C", sf: "#0E1218", sf2: "#151B24", sf3: "#1C2433",
+  bd: "#232D3B", bd2: "#2E3A4A",
+  tx: "#E4E9F1", tm: "#7E8CA0", td: "#4A5568",
+  ac: "#F7B731", ur: "#EF4444", gn: "#10B981",
+  bl: "#3B82F6", pu: "#8B5CF6", or: "#F97316", cy: "#06B6D4",
+};
+
+export const JOB_COLORS = [
+  "#3B82F6","#F59E0B","#10B981","#8B5CF6","#06B6D4",
+  "#F97316","#EC4899","#14B8A6","#6366F1","#F43F5E",
+  "#22D3EE","#A855F7",
+];
+
+export const STATUS_COLORS = {
+  pending: COLORS.td, casting: COLORS.or, machining: COLORS.bl,
+  vibratory: COLORS.pu, painting: COLORS.cy, lab: "#A78BFA",
+  complete: COLORS.gn,
+};
+
+// ─── Translations ──────────────────────────────────────
+export const TRANSLATIONS = {
+  en: {
+    app: "CastFlow — NIDC",
+    dashboard: "Dashboard", orders: "Orders", castGantt: "Machine Gantt",
+    machines: "Machines", targets: "$45K Target", scheduling: "Scheduling",
+    painting: "Painting", crew: "Crew",
+    upload: "Upload Excel", clear: "Clear", loading: "Loading...",
+    total: "Total Jobs", profit: "Revenue", scrap: "Scrap 10%",
+    urgent: "URGENT", high: "High", normal: "Normal",
+    partName: "Part Name", die: "Die #", qty: "Qty", balance: "Balance",
+    profitU: "$/Unit", due: "Due", priority: "Priority", status: "Status",
+    caster: "Caster", actions: "Actions", shopOrder: "Shop Order",
+    casting: "Casting", machining: "Machining", vibratory: "Vibratory",
+    lab: "Lab/QC", painting2: "Painting", complete: "Complete", pending: "Pending",
+    edit: "Edit", del: "Delete", dup: "Duplicate", save: "Save",
+    cancel: "Cancel", add: "Add Order", search: "Search...",
+    run: "Auto-Schedule", optimizing: "Optimizing...",
+    overdue: "Overdue", noUrgent: "No urgent parts", notes: "Notes",
+    zinc: "Zinc", al400: "400T", al600: "600T", al800: "800T",
+    autoFan: "Auto Fan", haas: "Haas CNC", handDip: "Hand Dip",
+    dieChg: "Die Change", hrs: "hrs", setup: "Setup",
+    paintDept: "Painting Dept (Off-site)", alerts: "Alerts",
+    target: "Daily Target: $45,000", projected: "Projected",
+    today: "Today's Actual", targetMet: "TARGET MET", below: "BELOW TARGET",
+    guide: "Worker Guide — Hit $45K today",
+    dailyPcs: "Pcs/Day", revDay: "$/Day", pctTarget: "% Target",
+    actual: "Actual", weekTrend: "Weekly Revenue Trend",
+    noData: "Upload your Production Schedule Excel to start",
+    jobs: "jobs", pcs: "pcs", first: "1st", second: "2nd",
+    machDown: "MACHINE DOWN", noJobs: "No jobs",
+    changes: "changes", downtime: "downtime",
+    saved: "Saved!", deleted: "Deleted", duplicated: "Duplicated",
+    scheduled: "Optimized!", confirmDel: "Delete?", yes: "Yes", no: "No",
+    connected: "Connected", offline: "Offline — add Supabase credentials",
+    weekOf: "Week of",
+    // Crew
+    operator: "Operator", supervisor: "Supervisor",
+    shift1: "1st Shift", shift2: "2nd Shift",
+    worker: "Worker", assignWorker: "Assign workers & supervisors",
+    noWorker: "Unassigned",
+  },
+  es: {
+    app: "CastFlow — NIDC",
+    dashboard: "Tablero", orders: "Órdenes", castGantt: "Gantt Máquinas",
+    machines: "Máquinas", targets: "Meta $45K", scheduling: "Programación",
+    painting: "Pintura", crew: "Personal",
+    upload: "Subir Excel", clear: "Limpiar", loading: "Cargando...",
+    total: "Total Trabajos", profit: "Ingresos", scrap: "Desperdicio 10%",
+    urgent: "URGENTE", high: "Alta", normal: "Normal",
+    partName: "Parte", die: "Molde #", qty: "Cant.", balance: "Balance",
+    profitU: "$/U", due: "Fecha", priority: "Prioridad", status: "Estado",
+    caster: "Fundidora", actions: "Acciones", shopOrder: "Orden",
+    casting: "Fundición", machining: "Maquinado", vibratory: "Vibratorio",
+    lab: "Lab/QC", painting2: "Pintura", complete: "Completo", pending: "Pendiente",
+    edit: "Editar", del: "Eliminar", dup: "Duplicar", save: "Guardar",
+    cancel: "Cancelar", add: "Agregar", search: "Buscar...",
+    run: "Auto-Programar", optimizing: "Optimizando...",
+    overdue: "Atrasado", noUrgent: "Sin urgentes", notes: "Notas",
+    zinc: "Zinc", al400: "400T", al600: "600T", al800: "800T",
+    autoFan: "Auto Vent.", haas: "Haas CNC", handDip: "Inmersión",
+    dieChg: "Cambio Molde", hrs: "hrs", setup: "Config.",
+    paintDept: "Depto. Pintura (Externo)", alerts: "Alertas",
+    target: "Meta Diaria: $45,000", projected: "Proyectado",
+    today: "Actual Hoy", targetMet: "META CUMPLIDA", below: "DEBAJO DE META",
+    guide: "Guía — Producir $45K hoy",
+    dailyPcs: "Pzas/Día", revDay: "$/Día", pctTarget: "% Meta",
+    actual: "Real", weekTrend: "Tendencia Semanal",
+    noData: "Sube tu Excel de Producción para empezar",
+    jobs: "trabajos", pcs: "pzas", first: "1ro", second: "2do",
+    machDown: "MÁQUINA PARADA", noJobs: "Sin trabajos",
+    changes: "cambios", downtime: "tiempo muerto",
+    saved: "¡Guardado!", deleted: "Eliminado", duplicated: "Duplicado",
+    scheduled: "¡Optimizado!", confirmDel: "¿Eliminar?", yes: "Sí", no: "No",
+    connected: "Conectado", offline: "Sin conexión — agrega credenciales Supabase",
+    weekOf: "Semana del",
+    operator: "Operador", supervisor: "Supervisor",
+    shift1: "1er Turno", shift2: "2do Turno",
+    worker: "Trabajador", assignWorker: "Asignar trabajadores y supervisores",
+    noWorker: "Sin asignar",
+  },
+};
+
+export const DAILY_TARGET = 45000;
