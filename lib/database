@@ -1,0 +1,139 @@
+import { supabase, isConnected } from "./supabase";
+
+// ─── JOBS ──────────────────────────────────────────────
+
+export async function loadJobs() {
+  if (!isConnected()) return [];
+  const { data, error } = await supabase
+    .from("jobs")
+    .select("*")
+    .order("machine", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) { console.error("loadJobs:", error); return []; }
+  return data || [];
+}
+
+export async function saveJobs(jobs, weekStart) {
+  if (!isConnected()) return false;
+  // Clear old jobs for this week
+  await supabase.from("jobs").delete().eq("week_start", weekStart);
+  // Insert new
+  const { error } = await supabase.from("jobs").insert(
+    jobs.map(j => ({
+      machine: j.machine,
+      shop_order: j.shopOrder || "",
+      part: j.part || j.partName,
+      die: j.die || "",
+      balance: j.balance || j.quantity || 0,
+      priority: j.priority || "normal",
+      status: j.status || "pending",
+      assigned_caster: j.assignedCaster || j.machine,
+      shifts: JSON.stringify(j.shifts || [[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]),
+      is_down: j.isDown || false,
+      profit_per_unit: j.profitPerUnit || 0,
+      week_start: weekStart,
+      notes: j.notes || "",
+    }))
+  );
+  if (error) { console.error("saveJobs:", error); return false; }
+  return true;
+}
+
+export async function updateJob(id, updates) {
+  if (!isConnected()) return false;
+  const dbUpdates = {};
+  if (updates.partName !== undefined) dbUpdates.part = updates.partName;
+  if (updates.die !== undefined) dbUpdates.die = updates.die;
+  if (updates.quantity !== undefined) dbUpdates.balance = updates.quantity;
+  if (updates.priority !== undefined) dbUpdates.priority = updates.priority;
+  if (updates.status !== undefined) dbUpdates.status = updates.status;
+  if (updates.assignedCaster !== undefined) dbUpdates.assigned_caster = updates.assignedCaster;
+  if (updates.notes !== undefined) dbUpdates.notes = updates.notes;
+  if (updates.shifts !== undefined) dbUpdates.shifts = JSON.stringify(updates.shifts);
+  if (updates.profitPerUnit !== undefined) dbUpdates.profit_per_unit = updates.profitPerUnit;
+  if (Object.keys(dbUpdates).length === 0) return true;
+  const { error } = await supabase.from("jobs").update(dbUpdates).eq("id", id);
+  if (error) { console.error("updateJob:", error); return false; }
+  return true;
+}
+
+export async function deleteJob(id) {
+  if (!isConnected()) return false;
+  const { error } = await supabase.from("jobs").delete().eq("id", id);
+  if (error) { console.error("deleteJob:", error); return false; }
+  return true;
+}
+
+// ─── WEEK SCHEDULE ─────────────────────────────────────
+
+export async function saveWeekSchedule(weekStart, weekDates, fileName) {
+  if (!isConnected()) return false;
+  const { error } = await supabase.from("week_schedule").insert([{
+    week_start: weekStart,
+    week_dates: JSON.stringify(weekDates),
+    file_name: fileName,
+  }]);
+  if (error) console.error("saveWeekSchedule:", error);
+  return !error;
+}
+
+export async function loadLatestWeek() {
+  if (!isConnected()) return null;
+  const { data, error } = await supabase
+    .from("week_schedule")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error || !data?.length) return null;
+  return data[0];
+}
+
+// ─── CREW ASSIGNMENTS ──────────────────────────────────
+
+export async function loadCrew() {
+  if (!isConnected()) return [];
+  const { data, error } = await supabase
+    .from("crew_assignments")
+    .select("*")
+    .order("machine", { ascending: true });
+  if (error) { console.error("loadCrew:", error); return []; }
+  return data || [];
+}
+
+export async function saveCrew(machine, shift, role, name) {
+  if (!isConnected()) return false;
+  // Upsert: update if exists, insert if not
+  const { data: existing } = await supabase
+    .from("crew_assignments")
+    .select("id")
+    .eq("machine", machine)
+    .eq("shift", shift)
+    .eq("role", role)
+    .limit(1);
+  
+  if (existing?.length) {
+    const { error } = await supabase
+      .from("crew_assignments")
+      .update({ name })
+      .eq("id", existing[0].id);
+    return !error;
+  } else {
+    const { error } = await supabase
+      .from("crew_assignments")
+      .insert([{ machine, shift, role, name }]);
+    return !error;
+  }
+}
+
+// ─── DAILY ACTUALS ─────────────────────────────────────
+
+export async function saveActual(jobId, date, shift, actualPcs) {
+  if (!isConnected()) return false;
+  const { error } = await supabase.from("daily_actuals").insert([{
+    job_id: jobId,
+    date,
+    shift,
+    actual_pcs: actualPcs,
+  }]);
+  return !error;
+}
