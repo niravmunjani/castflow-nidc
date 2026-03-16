@@ -1,8 +1,23 @@
+import Head from "next/head";
+import dynamic from "next/dynamic";
+
+// Wrap in dynamic to avoid SSR issues with xlsx parser
+const CastFlowApp = dynamic(() => Promise.resolve(CastFlow), { ssr: false });
+
+export default function Home() {
+  return (
+    <>
+      <Head>
+        <title>CastFlow — NIDC Production Planner</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <style>{`*{box-sizing:border-box;margin:0;padding:0}body{background:#06080C;color:#E4E9F1;font-family:'Segoe UI',sans-serif}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:#0E1218}::-webkit-scrollbar-thumb{background:#2E3A4A;border-radius:3px}select option{background:#151B24;color:#E4E9F1}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
+      </Head>
+      <CastFlowApp />
+    </>
+  );
+}
+
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
-import { parseNIDCSchedule } from "@/lib/excelParser";
-import { MACHINES, MACHINE_INFO, COLORS as C, JOB_COLORS as JC, STATUS_COLORS as SC, TRANSLATIONS as T, DAILY_TARGET } from "@/lib/constants";
-import { isConnected } from "@/lib/supabase";
-import { loadJobs, saveJobs, updateJob as dbUpdateJob, deleteJob as dbDeleteJob, saveWeekSchedule, loadLatestWeek } from "@/lib/database";
 
 /* ════════════════════════════════════════════════════════════
    CASTFLOW v2 — NIDC Weekly Production Planning System
@@ -191,7 +206,7 @@ const Chart=({data,w:W=600,h:H=180})=>{
 // ═══════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════
-export default function CastFlow(){
+function CastFlow(){
   const[lang,setLang]=useState("en");
   const[page,setPage]=useState("dashboard");
   const[orders,setOrders]=useState([]);
