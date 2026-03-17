@@ -1,6 +1,5 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import Head from "next/head";
-import * as XLSX from "xlsx";
 
 function CastFlow() {
 const C={bg:"#06080C",sf:"#0E1218",sf2:"#151B24",sf3:"#1C2433",bd:"#232D3B",bd2:"#2E3A4A",tx:"#E4E9F1",tm:"#7E8CA0",td:"#4A5568",ac:"#F7B731",ur:"#EF4444",gn:"#10B981",bl:"#3B82F6",pu:"#8B5CF6",or:"#F97316",cy:"#06B6D4"};
@@ -181,12 +180,13 @@ const Chart=({data,w:W=600,h:H=180})=>{
   const handleFile=useCallback(async f=>{
     if(!f)return;setFileName(f.name);setIsLoading(true);
     try{
-      const buf=await f.arrayBuffer();const wb=XLSX.read(buf,{type:"array",cellDates:true});
+      const buf=await f.arrayBuffer();const XLSX=await import("xlsx");const wb=XLSX.read(buf,{type:"array",cellDates:true});
       const sn=wb.SheetNames.find(s=>s.toLowerCase().includes("casting sched"))||wb.SheetNames[0];
       const raw=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:""});
       const dr=raw[1]||[];const wd=[];
       for(let c=8;c<=18;c+=2){const v=dr[c];
-        if(typeof v==="number"&&v>40000){const d=new Date((v-25569)*864e5);wd.push(d.toLocaleDateString("en-US",{weekday:"short",month:"numeric",day:"numeric"}))}
+        if(v instanceof Date){wd.push(v.toLocaleDateString("en-US",{weekday:"short",month:"numeric",day:"numeric"}))}
+        else if(typeof v==="number"&&v>40000){const d=new Date((v-25569)*864e5);wd.push(d.toLocaleDateString("en-US",{weekday:"short",month:"numeric",day:"numeric"}))}
         else if(typeof v==="string"&&v){try{const d=new Date(v);if(!isNaN(d))wd.push(d.toLocaleDateString("en-US",{weekday:"short",month:"numeric",day:"numeric"}));else wd.push(`Day ${wd.length+1}`)}catch{wd.push(`Day ${wd.length+1}`)}}
         else wd.push(`Day ${wd.length+1}`)}
       setWeekDates(wd);setWeekLabel(wd[0]||"");
