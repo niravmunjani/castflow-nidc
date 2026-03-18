@@ -20,7 +20,7 @@ const SC={pending:C.td,casting:C.or,machining:C.bl,vibratory:C.pu,painting:C.cy,
 
 // ═══ TRANSLATIONS ═══
 const T={en:{
-app:"CastFlow — NIDC",dashboard:"Dashboard",castGantt:"Machine Gantt",orders:"Orders",targets:"$45K Target",scheduling:"Scheduling",painting:"Painting",machines:"Machines",people:"People",planning:"Planning",
+app:"CastFlow — NIDC",dashboard:"Dashboard",castGantt:"Machine Gantt",orders:"Orders",targets:"$45K Target",scheduling:"Scheduling",painting:"Painting",machines:"Machines",people:"People",planning:"Planning",aiPlan:"AI Planner",
 upload:"Upload Weekly Schedule",drop:"Drop .xlsx or click",weekOf:"Week of",
 total:"Total Jobs",profit:"Revenue Pipeline",scrap:"Scrap 10%",
 partName:"Part",die:"Die #",qty:"Qty",balance:"Balance",profitU:"$/Unit",due:"Due",priority:"Priority",status:"Status",caster:"Machine",actions:"",shopOrder:"S.O.#",
@@ -50,7 +50,7 @@ risk:"Risk",shiftsNeeded:"shifts needed",onlyHave:"only have",available:"availab
 totalDieChanges:"Total Die Changes",totalDowntimeHrs:"Total Downtime Hours",
 heavily:"Heavily Loaded",balanced:"Balanced",light:"Light Load",empty:"Empty",
 },es:{
-app:"CastFlow — NIDC",dashboard:"Tablero",castGantt:"Gantt Máquinas",orders:"Órdenes",targets:"Meta $45K",scheduling:"Programación",painting:"Pintura",machines:"Máquinas",people:"Personal",planning:"Planificación",
+app:"CastFlow — NIDC",dashboard:"Tablero",castGantt:"Gantt Máquinas",orders:"Órdenes",targets:"Meta $45K",scheduling:"Programación",painting:"Pintura",machines:"Máquinas",people:"Personal",planning:"Planificación",aiPlan:"Planificador AI",
 upload:"Subir Programa Semanal",drop:"Arrastra .xlsx o haz clic",weekOf:"Semana del",
 total:"Total Trabajos",profit:"Ingresos en Proceso",scrap:"Desperdicio 10%",
 partName:"Parte",die:"Molde #",qty:"Cant.",balance:"Balance",profitU:"$/U",due:"Fecha",priority:"Prioridad",status:"Estado",caster:"Máquina",actions:"",shopOrder:"O.T.#",
@@ -649,7 +649,215 @@ const Chart=({data,w:W=600,h:H=180})=>{
     </div>
   </div>;
 
-  const pages={dashboard:renderDash,planning:renderPlanning,castGantt:renderCastGantt,targets:renderTargets,orders:renderOrders,people:renderPeople,machines:renderMach,scheduling:renderSched,painting:renderPaint};
+  // ─── AI Planner ───────────────────────────────────────
+  const[aiOrders,setAiOrders]=useState([{id:1,part:"",die:"",qty:0,machType:"al400",deadline:"",priority:"normal",profitPerUnit:0}]);
+  const[aiPlan,setAiPlan]=useState(null);
+  const[aiLoading,setAiLoading]=useState(false);
+  const[aiError,setAiError]=useState("");
+
+  const addAiOrder=()=>setAiOrders(p=>[...p,{id:Date.now(),part:"",die:"",qty:0,machType:"al400",deadline:"",priority:"normal",profitPerUnit:0}]);
+  const updAiOrder=(id,k,v)=>setAiOrders(p=>p.map(o=>o.id===id?{...o,[k]:v}:o));
+  const delAiOrder=id=>setAiOrders(p=>p.filter(o=>o.id!==id));
+
+  const runAiPlan=async()=>{
+    const validOrders=aiOrders.filter(o=>o.part&&o.qty>0);
+    if(!validOrders.length){setAiError(lang==="en"?"Add at least one order with part name and quantity":"Agrega al menos una orden con nombre y cantidad");return}
+    setAiLoading(true);setAiError("");setAiPlan(null);
+    const existingJobs=orders.filter(o=>!o.isDown&&o.hasWork).map(o=>`${o.assignedCaster}: ${o.partName} (Die:${o.die||"?"}, Bal:${o.quantity}, Shifts:${o.totalShifts})`).join("\n");
+    const prompt=`You are an expert die casting production scheduler for NIDC, an aluminum die casting company in Estherville, Iowa.
+
+NIDC MACHINES:
+- M2, M3: Zinc cold chamber (small parts)
+- M4, M5, M6, M7, M8, M9, M10: Aluminum 400-ton (medium parts)
+- M11: Auto fan (400-ton, specialized)
+- M12, M13: Aluminum 600-ton (larger parts)
+- M14: Aluminum 800-ton (biggest parts)
+- M8 is currently DOWN — do NOT schedule anything on M8
+
+CONSTRAINTS:
+- Die changes take 3-5 hours (lost production)
+- Each machine runs 2 shifts/day (1st and 2nd), 6 days/week (Mon-Sat)
+- Average parts per shift varies: zinc ~500, 400T ~300-500, 600T ~200-300, 800T ~150-250
+- 10% scrap allowance (cast 10% more than needed)
+- Daily revenue target: $45,000
+- Same die on same machine = no die change needed (batch together!)
+- Group parts by die to minimize changeovers
+
+CURRENTLY RUNNING (do not reschedule these):
+${existingJobs||"No current jobs"}
+
+NEW ORDERS TO SCHEDULE:
+${validOrders.map((o,i)=>`${i+1}. Part: ${o.part}, Die: ${o.die||"TBD"}, Qty: ${o.qty}, Machine Type: ${o.machType}, Deadline: ${o.deadline||"ASAP"}, Priority: ${o.priority}, $/Unit: ${o.profitPerUnit||"TBD"}`).join("\n")}
+
+RESPOND ONLY IN THIS EXACT JSON FORMAT (no markdown, no backticks):
+{
+  "schedule": [
+    {"part":"PartName","die":"DieNum","machine":"M4","qty":1000,"shifts_1st":[3,2,1,0,0,0],"shifts_2nd":[3,2,1,0,0,0],"reason":"Why this machine and sequence"}
+  ],
+  "die_changes": [
+    {"machine":"M4","from":"D101","to":"D202","when":"Wednesday after 1st shift","downtime_hrs":4}
+  ],
+  "daily_revenue": [45000,43000,47000,45000,44000,20000],
+  "risks": ["Risk description 1","Risk description 2"],
+  "recommendations": ["Recommendation 1","Recommendation 2"],
+  "summary": "Brief summary of the plan"
+}`;
+
+    try{
+      const resp=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2000,
+          messages:[{role:"user",content:prompt}]})
+      });
+      const data=await resp.json();
+      const text=data.content?.map(c=>c.text||"").join("")||"";
+      const clean=text.replace(/```json|```/g,"").trim();
+      const plan=JSON.parse(clean);
+      setAiPlan(plan);
+    }catch(e){
+      console.error("AI error:",e);
+      setAiError(lang==="en"?"AI planning failed. Check console for details.":"Error en planificación AI. Revisa la consola.");
+    }finally{setAiLoading(false)}
+  };
+
+  const applyAiPlan=()=>{
+    if(!aiPlan?.schedule)return;
+    const newOrders=aiPlan.schedule.map((s,i)=>{
+      const sh=[];for(let d=0;d<6;d++)sh.push([s.shifts_1st?.[d]||0,s.shifts_2nd?.[d]||0]);
+      return{
+        id:`AI${Date.now()}-${i}`,partName:s.part,die:s.die||"",quantity:s.qty||0,
+        castQuantity:Math.ceil((s.qty||0)*1.1),
+        profitPerUnit:aiOrders.find(o=>o.part===s.part)?.profitPerUnit||0,
+        totalProfit:((s.qty||0)*(aiOrders.find(o=>o.part===s.part)?.profitPerUnit||0)).toFixed(2),
+        priority:aiOrders.find(o=>o.part===s.part)?.priority||"normal",
+        status:"casting",assignedCaster:s.machine,machine:s.machine,
+        needsHaas:false,needsPaint:false,batchGroup:s.die||s.part,
+        notes:s.reason||"",shopOrder:"",shifts:sh,isDown:false,
+        hasWork:sh.some(x=>x[0]>0||x[1]>0),
+        totalShifts:sh.reduce((a,x)=>a+x[0]+x[1],0),
+        machineType:MI[s.machine]?.type||"al400",
+      };
+    });
+    setOrders(p=>[...p,...newOrders]);
+    // Save to Supabase
+    const weekStart=weekDates[0]||"ai-planned";
+    newOrders.forEach(o=>{
+      db.insert("jobs",[{machine:o.machine,part:o.partName,die:o.die,balance:o.quantity,priority:o.priority,status:"casting",assigned_caster:o.assignedCaster,shifts:JSON.stringify(o.shifts),is_down:false,profit_per_unit:o.profitPerUnit,week_start:weekStart,notes:o.notes}]);
+    });
+    setPage("castGantt");flash(lang==="en"?"AI plan applied to schedule!":"¡Plan AI aplicado al programa!");
+  };
+
+  const mtOpts=[{v:"zinc",l:"Zinc (M2-M3)"},{v:"al400",l:"400T (M4-M10)"},{v:"al600",l:"600T (M12-M13)"},{v:"al800",l:"800T (M14)"},{v:"autoFan",l:"Auto Fan (M11)"}];
+
+  const renderAiPlan=()=><div style={{display:"flex",flexDirection:"column",gap:14}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6}}>
+      <div>
+        <div style={{fontSize:16,fontWeight:900,color:C.ac}}>🤖 {lang==="en"?"AI Production Planner":"Planificador AI de Producción"}</div>
+        <div style={{fontSize:9,color:C.tm}}>{lang==="en"?"Enter your orders → AI creates the optimal weekly schedule":"Ingresa tus órdenes → AI crea el programa semanal óptimo"}</div>
+      </div>
+    </div>
+
+    {/* Order Entry */}
+    <div style={cd()}>
+      <div style={{fontSize:12,fontWeight:800,color:C.tx,marginBottom:8}}>{lang==="en"?"📦 Orders to Schedule":"📦 Órdenes a Programar"}</div>
+      <div style={{overflow:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",minWidth:700}}>
+          <thead><tr>{[lang==="en"?"Part Name":"Parte",lang==="en"?"Die #":"Molde",lang==="en"?"Quantity":"Cant.",lang==="en"?"Machine Type":"Tipo Máq.",lang==="en"?"Deadline":"Fecha Límite",lang==="en"?"Priority":"Prioridad","$/Unit",""].map((h,i)=>
+            <th key={i} style={thS}>{h}</th>)}</tr></thead>
+          <tbody>{aiOrders.map(o=><tr key={o.id}>
+            <td style={tdS}><input value={o.part} placeholder={lang==="en"?"e.g. HXE158115":"ej. HXE158115"} onChange={e=>updAiOrder(o.id,"part",e.target.value)} style={{...inp,background:"transparent",borderBottom:`1px dashed ${C.bd2}`,borderRadius:0}}/></td>
+            <td style={tdS}><input value={o.die} placeholder="D123" onChange={e=>updAiOrder(o.id,"die",e.target.value)} style={{...inp,width:70,background:"transparent",borderBottom:`1px dashed ${C.bd2}`,borderRadius:0}}/></td>
+            <td style={tdS}><input type="number" value={o.qty||""} placeholder="0" onChange={e=>updAiOrder(o.id,"qty",parseInt(e.target.value)||0)} style={{...inp,width:70,background:"transparent",borderBottom:`1px dashed ${C.bd2}`,borderRadius:0,textAlign:"center"}}/></td>
+            <td style={tdS}><select value={o.machType} onChange={e=>updAiOrder(o.id,"machType",e.target.value)} style={{background:C.sf3,color:C.tx,border:`1px solid ${C.bd}`,borderRadius:4,padding:"3px",fontSize:9,cursor:"pointer"}}>{mtOpts.map(x=><option key={x.v} value={x.v}>{x.l}</option>)}</select></td>
+            <td style={tdS}><input type="date" value={o.deadline} onChange={e=>updAiOrder(o.id,"deadline",e.target.value)} style={{...inp,width:120,background:"transparent",borderBottom:`1px dashed ${C.bd2}`,borderRadius:0}}/></td>
+            <td style={tdS}><select value={o.priority} onChange={e=>updAiOrder(o.id,"priority",e.target.value)} style={{background:C.sf3,color:C.tx,border:`1px solid ${C.bd}`,borderRadius:4,padding:"3px",fontSize:9,cursor:"pointer"}}>{priOpts.map(x=><option key={x.v} value={x.v}>{x.l}</option>)}</select></td>
+            <td style={tdS}><input type="number" value={o.profitPerUnit||""} placeholder="$" onChange={e=>updAiOrder(o.id,"profitPerUnit",parseFloat(e.target.value)||0)} style={{...inp,width:55,background:"transparent",borderBottom:`1px dashed ${C.bd2}`,borderRadius:0,textAlign:"center"}}/></td>
+            <td style={tdS}><button onClick={()=>delAiOrder(o.id)} style={{...bt(),padding:"1px 4px",fontSize:8,color:C.ur}}>✕</button></td>
+          </tr>)}</tbody>
+        </table>
+      </div>
+      <div style={{display:"flex",gap:6,marginTop:8}}>
+        <button onClick={addAiOrder} style={bt("o")}>{lang==="en"?"+ Add Order":"+ Agregar Orden"}</button>
+        <button onClick={runAiPlan} disabled={aiLoading} style={{...bt("p"),padding:"8px 20px",fontSize:12}}>
+          {aiLoading?"⏳ AI is thinking...":`🤖 ${lang==="en"?"Generate AI Schedule":"Generar Programa AI"}`}
+        </button>
+      </div>
+      {aiError&&<div style={{marginTop:6,fontSize:10,color:C.ur,padding:"6px 10px",background:`${C.ur}10`,borderRadius:6}}>❌ {aiError}</div>}
+    </div>
+
+    {/* AI Results */}
+    {aiPlan&&<div style={{display:"flex",flexDirection:"column",gap:10}}>
+      {/* Summary */}
+      <div style={{...cd(),border:`2px solid ${C.ac}30`,background:`${C.ac}05`}}>
+        <div style={{fontSize:13,fontWeight:900,color:C.ac,marginBottom:4}}>🤖 {lang==="en"?"AI Recommendation":"Recomendación AI"}</div>
+        <div style={{fontSize:11,color:C.tx,lineHeight:1.5}}>{aiPlan.summary}</div>
+        <button onClick={applyAiPlan} style={{...bt("p"),marginTop:10,padding:"8px 20px",fontSize:12}}>
+          ✅ {lang==="en"?"Apply This Plan to Schedule":"Aplicar Este Plan al Programa"}
+        </button>
+      </div>
+
+      {/* Schedule */}
+      {aiPlan.schedule?.length>0&&<div style={cd()}>
+        <div style={{fontSize:12,fontWeight:800,color:C.tx,marginBottom:6}}>📋 {lang==="en"?"Proposed Schedule":"Programa Propuesto"}</div>
+        <div style={{overflow:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr>{[lang==="en"?"Part":"Parte",lang==="en"?"Die":"Molde",lang==="en"?"Machine":"Máq.","Qty","Mon","Tue","Wed","Thu","Fri","Sat",lang==="en"?"Reason":"Razón"].map((h,i)=>
+            <th key={i} style={thS}>{h}</th>)}</tr></thead>
+          <tbody>{aiPlan.schedule.map((s,i)=><tr key={i}>
+            <td style={{...tdS,fontWeight:700}}>{s.part}</td>
+            <td style={{...tdS,color:C.ac,fontSize:9}}>{s.die||"—"}</td>
+            <td style={{...tdS,fontWeight:700,color:C.bl}}>{s.machine}</td>
+            <td style={tdS}>{s.qty?.toLocaleString()}</td>
+            {[0,1,2,3,4,5].map(d=>{const s1=s.shifts_1st?.[d]||0;const s2=s.shifts_2nd?.[d]||0;
+              return<td key={d} style={{...tdS,textAlign:"center"}}>
+                {(s1>0||s2>0)?<div><span style={{fontSize:9,fontWeight:700,color:C.or}}>{s1}</span><span style={{fontSize:7,color:C.td}}>/</span><span style={{fontSize:9,fontWeight:700,color:C.bl}}>{s2}</span></div>:<span style={{color:C.td}}>—</span>}
+              </td>})}
+            <td style={{...tdS,fontSize:8,color:C.tm,maxWidth:150}}>{s.reason}</td>
+          </tr>)}</tbody>
+        </table></div>
+      </div>}
+
+      {/* Die Changes */}
+      {aiPlan.die_changes?.length>0&&<div style={cd()}>
+        <div style={{fontSize:12,fontWeight:800,color:C.or,marginBottom:6}}>🔄 {lang==="en"?"Die Changes":"Cambios de Molde"} ({aiPlan.die_changes.length})</div>
+        {aiPlan.die_changes.map((dc,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 0",borderBottom:`1px solid ${C.bd}`}}>
+          <span style={{fontSize:12,fontWeight:800,color:C.tx}}>{dc.machine}</span>
+          <span style={{fontSize:9,padding:"1px 5px",borderRadius:3,background:`${C.or}15`,color:C.or}}>{dc.from} → {dc.to}</span>
+          <span style={{fontSize:8,color:C.tm}}>{dc.when}</span>
+          <span style={{fontSize:8,color:C.ur}}>⏱ {dc.downtime_hrs}h</span>
+        </div>)}
+      </div>}
+
+      {/* Daily Revenue */}
+      {aiPlan.daily_revenue?.length>0&&<div style={cd()}>
+        <div style={{fontSize:12,fontWeight:800,color:C.tx,marginBottom:6}}>💰 {lang==="en"?"Projected Daily Revenue":"Ingresos Diarios Proyectados"}</div>
+        <div style={{display:"flex",gap:4}}>
+          {aiPlan.daily_revenue.map((rev,i)=>{const pct=Math.min((rev/45e3)*100,100);const days=["Mon","Tue","Wed","Thu","Fri","Sat"];
+            return<div key={i} style={{flex:1,textAlign:"center"}}>
+              <div style={{height:60,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
+                <div style={{background:rev>=45e3?C.gn:rev>35e3?C.ac:C.or,borderRadius:"3px 3px 0 0",height:`${Math.max(pct,5)}%`}}/>
+              </div>
+              <div style={{fontSize:9,fontWeight:700,color:rev>=45e3?C.gn:C.tx,marginTop:2}}>${(rev/1e3).toFixed(0)}K</div>
+              <div style={{fontSize:7,color:C.tm}}>{days[i]}</div>
+            </div>})}
+        </div>
+      </div>}
+
+      {/* Risks */}
+      {aiPlan.risks?.length>0&&<div style={{...cd(),border:`1px solid ${C.ur}20`}}>
+        <div style={{fontSize:12,fontWeight:800,color:C.ur,marginBottom:4}}>⚠️ {lang==="en"?"Risks":"Riesgos"}</div>
+        {aiPlan.risks.map((r,i)=><div key={i} style={{fontSize:10,color:C.or,padding:"2px 0"}}>• {r}</div>)}
+      </div>}
+
+      {/* Recommendations */}
+      {aiPlan.recommendations?.length>0&&<div style={{...cd(),border:`1px solid ${C.gn}20`}}>
+        <div style={{fontSize:12,fontWeight:800,color:C.gn,marginBottom:4}}>💡 {lang==="en"?"Recommendations":"Recomendaciones"}</div>
+        {aiPlan.recommendations.map((r,i)=><div key={i} style={{fontSize:10,color:C.tx,padding:"2px 0"}}>• {r}</div>)}
+      </div>}
+    </div>}
+  </div>;
+
+  const pages={dashboard:renderDash,planning:renderPlanning,castGantt:renderCastGantt,targets:renderTargets,orders:renderOrders,aiPlan:renderAiPlan,people:renderPeople,machines:renderMach,scheduling:renderSched,painting:renderPaint};
 
   // ═══ RENDER ═══════════════════════════════════════════
   return(
@@ -677,7 +885,7 @@ const Chart=({data,w:W=600,h:H=180})=>{
 
       {/* Nav */}
       <div style={{display:"flex",gap:1,padding:"4px 14px",background:C.sf,borderBottom:`1px solid ${C.bd}`,overflowX:"auto"}}>
-        {[{id:"dashboard",ic:"📊"},{id:"planning",ic:"📋"},{id:"castGantt",ic:"🏭"},{id:"targets",ic:"🎯"},{id:"orders",ic:"📦"},{id:"people",ic:"👷"},{id:"machines",ic:"⚙️"},{id:"scheduling",ic:"🔄"},{id:"painting",ic:"🎨"}].map(n=>
+        {[{id:"dashboard",ic:"📊"},{id:"aiPlan",ic:"🤖"},{id:"planning",ic:"📋"},{id:"castGantt",ic:"🏭"},{id:"targets",ic:"🎯"},{id:"orders",ic:"📦"},{id:"people",ic:"👷"},{id:"machines",ic:"⚙️"},{id:"scheduling",ic:"🔄"},{id:"painting",ic:"🎨"}].map(n=>
           <button key={n.id} onClick={()=>setPage(n.id)} style={pill(page===n.id)}><span style={{fontSize:11}}>{n.ic}</span>{t[n.id]||n.id}</button>)}
       </div>
 
