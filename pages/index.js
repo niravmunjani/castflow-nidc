@@ -1,6 +1,18 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import Head from "next/head";
 
+// ─── Supabase REST Client ──────────────────────────────────
+const SB_URL="https://rjklrzzpwrapxdahgidz.supabase.co";
+const SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJqa2xyenpwd3JhcHhkYWhnaWR6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM1MTgyMDEsImV4cCI6MjA4OTA5NDIwMX0.gl3fLz-AD4Xvrub9WRAVcOnc7DvCfvveBAz6wSigX1Y";
+const sbH={"apikey":SB_KEY,"Authorization":`Bearer ${SB_KEY}`,"Content-Type":"application/json","Prefer":"return=representation"};
+const db={
+  async get(table,q=""){try{const r=await fetch(`${SB_URL}/rest/v1/${table}${q}`,{headers:sbH});return r.ok?await r.json():[]}catch{return[]}},
+  async insert(table,data){try{const r=await fetch(`${SB_URL}/rest/v1/${table}`,{method:"POST",headers:sbH,body:JSON.stringify(data)});return r.ok?await r.json():null}catch{return null}},
+  async update(table,id,data){try{await fetch(`${SB_URL}/rest/v1/${table}?id=eq.${id}`,{method:"PATCH",headers:sbH,body:JSON.stringify(data)})}catch{}},
+  async del(table,id){try{await fetch(`${SB_URL}/rest/v1/${table}?id=eq.${id}`,{method:"DELETE",headers:sbH})}catch{}},
+  async delWhere(table,col,val){try{await fetch(`${SB_URL}/rest/v1/${table}?${col}=eq.${val}`,{method:"DELETE",headers:sbH})}catch{}},
+};
+
 function CastFlow() {
 const C={bg:"#06080C",sf:"#0E1218",sf2:"#151B24",sf3:"#1C2433",bd:"#232D3B",bd2:"#2E3A4A",tx:"#E4E9F1",tm:"#7E8CA0",td:"#4A5568",ac:"#F7B731",ur:"#EF4444",gn:"#10B981",bl:"#3B82F6",pu:"#8B5CF6",or:"#F97316",cy:"#06B6D4"};
 const JC=["#3B82F6","#F59E0B","#10B981","#8B5CF6","#06B6D4","#F97316","#EC4899","#14B8A6","#6366F1","#F43F5E","#22D3EE","#A855F7"];
@@ -164,16 +176,53 @@ const Chart=({data,w:W=600,h:H=180})=>{
   const[actProd,setActProd]=useState({});
   const[search,setSearch]=useState("");
   const[isLoading,setIsLoading]=useState(false);
+  const[dbStatus,setDbStatus]=useState("loading");
   const fileRef=useRef();
   const t=T[lang];
   const flash=m=>{setToast(m);setTimeout(()=>setToast(null),2e3)};
 
-  // ─── Persistent Storage ───────────────────────────────
+  // ─── Load from Supabase on mount ─────────────────────
   useEffect(()=>{
-    try{
-      const saved=window.localStorage?.getItem?.("castflow_data");
-      // localStorage not available in artifact — silently skip
-    }catch{}
+    (async()=>{
+      try{
+        // Load latest week schedule
+        const ws=await db.get("week_schedule","?order=created_at.desc&limit=1");
+        if(ws?.[0]){
+          const wd=typeof ws[0].week_dates==="string"?JSON.parse(ws[0].week_dates):ws[0].week_dates;
+          if(wd?.length)setWeekDates(wd);
+          if(ws[0].file_name)setFileName(ws[0].file_name);
+          if(wd?.[0])setWeekLabel(wd[0]);
+        }
+        // Load jobs
+        const jobs=await db.get("jobs","?order=machine.asc,created_at.asc");
+        if(jobs?.length){
+          setOrders(jobs.map(j=>({
+            id:j.id,partName:j.part,die:j.die||"",quantity:j.balance||0,
+            castQuantity:Math.ceil((j.balance||0)*1.1),
+            profitPerUnit:j.profit_per_unit||0,totalProfit:((j.balance||0)*(j.profit_per_unit||0)).toFixed(2),
+            priority:j.priority||"normal",status:j.status||"pending",
+            assignedCaster:j.assigned_caster||j.machine,machine:j.machine,
+            needsHaas:j.needs_haas||false,needsPaint:j.needs_paint||false,
+            batchGroup:j.die||j.part,notes:j.notes||"",shopOrder:j.shop_order||"",
+            shifts:typeof j.shifts==="string"?JSON.parse(j.shifts):(j.shifts||[[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]),
+            isDown:j.is_down||false,
+            hasWork:(typeof j.shifts==="string"?JSON.parse(j.shifts):(j.shifts||[])).some(s=>s[0]>0||s[1]>0),
+            totalShifts:(typeof j.shifts==="string"?JSON.parse(j.shifts):(j.shifts||[])).reduce((a,s)=>a+s[0]+s[1],0),
+            machineType:MI[j.machine]?.type||"al400",
+          })));
+          setPage("dashboard");
+        }
+        // Load workers
+        const crew=await db.get("crew_assignments","?order=machine.asc");
+        if(crew?.length){
+          const w=crew.filter(c=>c.role==="operator").map(c=>({id:c.id,name:c.name||"",machine:c.machine,shift:c.shift,lang:"es",role:c.role}));
+          const s=crew.filter(c=>c.role==="supervisor").map(c=>({id:c.id,name:c.name||"",machines:MACH_LIST,shift:c.shift,role:c.role}));
+          if(w.length)setWorkers(w);
+          if(s.length)setSupers(s);
+        }
+        setDbStatus("connected");
+      }catch(e){console.error("DB load error:",e);setDbStatus("offline")}
+    })();
   },[]);
 
   // ─── Excel Upload ─────────────────────────────────────
@@ -209,16 +258,42 @@ const Chart=({data,w:W=600,h:H=180})=>{
         });
       }
       setOrders(newO);setPage("planning");setActProd({});
+      // Save to Supabase
+      try{
+        const weekStart=wd[0]||"unknown";
+        // Clear old jobs and save new ones
+        await db.delWhere("jobs","week_start",weekStart);
+        const dbJobs=newO.map(o=>({machine:o.assignedCaster||o.machine,shop_order:o.shopOrder||"",part:o.partName,die:o.die||"",balance:o.quantity||0,priority:o.priority,status:o.status,assigned_caster:o.assignedCaster,shifts:JSON.stringify(o.shifts),is_down:o.isDown||false,profit_per_unit:o.profitPerUnit||0,needs_haas:o.needsHaas||false,needs_paint:o.needsPaint||false,week_start:weekStart,notes:""}));
+        if(dbJobs.length)await db.insert("jobs",dbJobs);
+        // Save week metadata
+        await db.insert("week_schedule",[{week_start:weekStart,week_dates:JSON.stringify(wd),file_name:f.name}]);
+        setDbStatus("connected");
+        // Reload to get server-generated IDs
+        const saved=await db.get("jobs","?order=machine.asc,created_at.asc&week_start=eq."+encodeURIComponent(weekStart));
+        if(saved?.length){setOrders(saved.map(j=>({id:j.id,partName:j.part,die:j.die||"",quantity:j.balance||0,castQuantity:Math.ceil((j.balance||0)*1.1),profitPerUnit:j.profit_per_unit||0,totalProfit:((j.balance||0)*(j.profit_per_unit||0)).toFixed(2),priority:j.priority||"normal",status:j.status||"pending",assignedCaster:j.assigned_caster||j.machine,machine:j.machine,needsHaas:j.needs_haas||false,needsPaint:j.needs_paint||false,batchGroup:j.die||j.part,notes:j.notes||"",shopOrder:j.shop_order||"",shifts:typeof j.shifts==="string"?JSON.parse(j.shifts):(j.shifts||[[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]),isDown:j.is_down||false,hasWork:(typeof j.shifts==="string"?JSON.parse(j.shifts):(j.shifts||[])).some(s=>s[0]>0||s[1]>0),totalShifts:(typeof j.shifts==="string"?JSON.parse(j.shifts):(j.shifts||[])).reduce((a,s)=>a+s[0]+s[1],0),machineType:MI[j.machine]?.type||"al400"})))}
+      }catch(e){console.error("DB save error:",e);setDbStatus("offline")}
       flash(`${newO.filter(o=>!o.isDown).length} ${t.jobs} loaded!`);
     }catch(err){console.error(err);alert("Error: "+err.message)}finally{setIsLoading(false)}
   },[t]);
 
-  // ─── CRUD ─────────────────────────────────────────────
-  const upd=useCallback((id,u)=>setOrders(p=>p.map(o=>{if(o.id!==id)return o;const n={...o,...u};if(u.quantity!==undefined){n.castQuantity=Math.ceil(n.quantity*1.1);n.totalProfit=(n.quantity*n.profitPerUnit).toFixed(2)}return n})),[]);
-  const del=useCallback(id=>{setOrders(p=>p.filter(o=>o.id!==id));setDelId(null);flash(t.deleted)},[t]);
-  const dup=useCallback(id=>{setOrders(p=>{const s=p.find(o=>o.id===id);if(!s)return p;return[...p,{...s,id:`J${Date.now()}`,status:"pending"}]});flash(t.duplicated)},[t]);
+  // ─── CRUD (with Supabase sync) ─────────────────────────
+  const upd=useCallback((id,u)=>{
+    setOrders(p=>p.map(o=>{if(o.id!==id)return o;const n={...o,...u};if(u.quantity!==undefined){n.castQuantity=Math.ceil(n.quantity*1.1);n.totalProfit=(n.quantity*n.profitPerUnit).toFixed(2)}return n}));
+    // Sync to DB
+    const dbu={};
+    if(u.partName!==undefined)dbu.part=u.partName;if(u.die!==undefined)dbu.die=u.die;
+    if(u.quantity!==undefined)dbu.balance=u.quantity;if(u.priority!==undefined)dbu.priority=u.priority;
+    if(u.status!==undefined)dbu.status=u.status;if(u.assignedCaster!==undefined)dbu.assigned_caster=u.assignedCaster;
+    if(u.notes!==undefined)dbu.notes=u.notes;if(u.profitPerUnit!==undefined)dbu.profit_per_unit=u.profitPerUnit;
+    if(u.shifts!==undefined)dbu.shifts=JSON.stringify(u.shifts);if(u.shopOrder!==undefined)dbu.shop_order=u.shopOrder;
+    if(Object.keys(dbu).length)db.update("jobs",id,dbu);
+  },[]);
+  const del=useCallback(id=>{setOrders(p=>p.filter(o=>o.id!==id));setDelId(null);db.del("jobs",id);flash(t.deleted)},[t]);
+  const dup=useCallback(id=>{setOrders(p=>{const s=p.find(o=>o.id===id);if(!s)return p;const n={...s,id:`J${Date.now()}`,status:"pending"};
+    db.insert("jobs",[{machine:n.machine||n.assignedCaster,part:n.partName,die:n.die,balance:n.quantity,priority:n.priority,status:"pending",assigned_caster:n.assignedCaster,shifts:JSON.stringify(n.shifts),is_down:false,profit_per_unit:n.profitPerUnit,week_start:weekDates[0]||""}]);
+    return[...p,n]});flash(t.duplicated)},[t,weekDates]);
   const togUrg=useCallback(id=>{const o=orders.find(x=>x.id===id);if(o)upd(id,{priority:o.priority==="urgent"?"normal":"urgent"})},[orders,upd]);
-  const updateShift=useCallback((jid,di,si,nv)=>{setOrders(p=>p.map(o=>{if(o.id!==jid)return o;const sh=o.shifts.map((s,d)=>d===di?(si===0?[nv,s[1]]:[s[0],nv]):[...s]);return{...o,shifts:sh,hasWork:sh.some(s=>s[0]>0||s[1]>0),totalShifts:sh.reduce((a,s)=>a+s[0]+s[1],0)}}));},[]);
+  const updateShift=useCallback((jid,di,si,nv)=>{setOrders(p=>p.map(o=>{if(o.id!==jid)return o;const sh=o.shifts.map((s,d)=>d===di?(si===0?[nv,s[1]]:[s[0],nv]):[...s]);db.update("jobs",jid,{shifts:JSON.stringify(sh)});return{...o,shifts:sh,hasWork:sh.some(s=>s[0]>0||s[1]>0),totalShifts:sh.reduce((a,s)=>a+s[0]+s[1],0)}}));},[]);
   const runSched=useCallback(()=>{setIsOpt(true);setTimeout(()=>{setOrders(p=>{let u=[...p];u.sort((a,b)=>({urgent:0,high:1,normal:2}[a.priority]||2)-({urgent:0,high:1,normal:2}[b.priority]||2));u.forEach(o=>{if(o.status==="pending"&&!o.isDown)o.status="casting"});return u});setIsOpt(false);flash(t.scheduled)},800)},[t]);
 
   const empty={partName:"",die:"",quantity:0,profitPerUnit:0,machineType:"al400",priority:"normal",assignedCaster:"M4"};
@@ -585,7 +660,7 @@ const Chart=({data,w:W=600,h:H=180})=>{
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 14px",background:C.sf,borderBottom:`1px solid ${C.bd}`,position:"sticky",top:0,zIndex:100}}>
         <div style={{display:"flex",alignItems:"center",gap:6}}>
           <div style={{width:26,height:26,borderRadius:5,background:`linear-gradient(135deg,${C.ac},${C.or})`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:9,color:"#000"}}>CF</div>
-          <div><div style={{fontSize:12,fontWeight:800}}>{t.app}</div>{weekLabel&&<div style={{fontSize:7,color:C.ac}}>{t.weekOf} {weekLabel}</div>}</div>
+          <div><div style={{fontSize:12,fontWeight:800}}>{t.app}</div>{weekLabel?<div style={{fontSize:7,color:C.ac}}>{t.weekOf} {weekLabel} <span style={{color:dbStatus==="connected"?C.gn:C.td}}>● {dbStatus==="connected"?"Synced":"Local"}</span></div>:<div style={{fontSize:7,color:dbStatus==="connected"?C.gn:C.td}}>● {dbStatus==="connected"?"Connected":"Offline"}</div>}</div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:5}}>
           <div style={{position:"relative"}}>
