@@ -1,563 +1,1019 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import Head from "next/head";
 
-// ─── Supabase ──────────────────────────────────────────
+// ─── Supabase REST Client ──────────────────────────────────
 const SB_URL="https://rjklrzzpwrapxdahgidz.supabase.co";
 const SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJqa2xyenpwd3JhcHhkYWhnaWR6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM1MTgyMDEsImV4cCI6MjA4OTA5NDIwMX0.gl3fLz-AD4Xvrub9WRAVcOnc7DvCfvveBAz6wSigX1Y";
 const sbH={"apikey":SB_KEY,"Authorization":`Bearer ${SB_KEY}`,"Content-Type":"application/json","Prefer":"return=representation"};
 const db={
-  async get(t,q=""){try{const r=await fetch(`${SB_URL}/rest/v1/${t}${q}`,{headers:sbH});return r.ok?await r.json():[]}catch{return[]}},
-  async insert(t,d){try{const r=await fetch(`${SB_URL}/rest/v1/${t}`,{method:"POST",headers:sbH,body:JSON.stringify(d)});return r.ok?await r.json():null}catch{return null}},
-  async update(t,id,d){try{await fetch(`${SB_URL}/rest/v1/${t}?id=eq.${id}`,{method:"PATCH",headers:sbH,body:JSON.stringify(d)})}catch{}},
-  async del(t,id){try{await fetch(`${SB_URL}/rest/v1/${t}?id=eq.${id}`,{method:"DELETE",headers:sbH})}catch{}},
+  async get(table,q=""){try{const r=await fetch(`${SB_URL}/rest/v1/${table}${q}`,{headers:sbH});return r.ok?await r.json():[]}catch{return[]}},
+  async insert(table,data){try{const r=await fetch(`${SB_URL}/rest/v1/${table}`,{method:"POST",headers:sbH,body:JSON.stringify(data)});return r.ok?await r.json():null}catch{return null}},
+  async update(table,id,data){try{await fetch(`${SB_URL}/rest/v1/${table}?id=eq.${id}`,{method:"PATCH",headers:sbH,body:JSON.stringify(data)})}catch{}},
+  async del(table,id){try{await fetch(`${SB_URL}/rest/v1/${table}?id=eq.${id}`,{method:"DELETE",headers:sbH})}catch{}},
+  async delWhere(table,col,val){try{await fetch(`${SB_URL}/rest/v1/${table}?${col}=eq.${val}`,{method:"DELETE",headers:sbH})}catch{}},
 };
 
-// ─── Constants ─────────────────────────────────────────
-const P={bg:"#06080C",sf:"#0E1218",sf2:"#151B24",sf3:"#1C2433",bd:"#232D3B",bd2:"#2E3A4A",tx:"#E4E9F1",tm:"#7E8CA0",td:"#4A5568",ac:"#F7B731",ur:"#EF4444",gn:"#10B981",bl:"#3B82F6",pu:"#8B5CF6",or:"#F97316",cy:"#06B6D4"};
-const JC=["#3B82F6","#F59E0B","#10B981","#8B5CF6","#06B6D4","#F97316","#EC4899","#14B8A6","#6366F1","#F43F5E","#22D3EE","#A855F7","#84CC16","#FB923C","#38BDF8"];
-const MACH=["M2","M3","M4","M5","M6","M7","M8","M9","M10","M11","M12","M13","M14"];
-const MI={M2:{type:"Zinc",ton:0,avg:500,dch:4},M3:{type:"Zinc",ton:0,avg:500,dch:4},M4:{type:"400T",ton:400,avg:400,dch:4},M5:{type:"400T",ton:400,avg:400,dch:4},M6:{type:"400T",ton:400,avg:350,dch:4},M7:{type:"400T",ton:400,avg:350,dch:4},M8:{type:"400T",ton:400,avg:0,dch:4,down:true},M9:{type:"400T",ton:400,avg:400,dch:4},M10:{type:"400T",ton:400,avg:300,dch:4},M11:{type:"Auto Fan",ton:400,avg:350,dch:5},M12:{type:"600T",ton:600,avg:250,dch:5},M13:{type:"600T",ton:600,avg:275,dch:5},M14:{type:"800T",ton:800,avg:150,dch:5}};
-// DCM code → which machines can run it
-const DCM_MAP={"200":["M2","M3"],"400":["M4","M5","M6","M7","M9","M10"],"500":["M4","M5","M6","M7","M9","M10"],"600":["M12","M13"],"700":["M4","M5","M6","M7","M9","M10","M12","M13"],"800":["M14"],"1K":["M14"]};
-const DAYS=["Mon","Tue","Wed","Thu","Fri"];
+function CastFlow() {
+const C={bg:"#06080C",sf:"#0E1218",sf2:"#151B24",sf3:"#1C2433",bd:"#232D3B",bd2:"#2E3A4A",tx:"#E4E9F1",tm:"#7E8CA0",td:"#4A5568",ac:"#F7B731",ur:"#EF4444",gn:"#10B981",bl:"#3B82F6",pu:"#8B5CF6",or:"#F97316",cy:"#06B6D4"};
+const JC=["#3B82F6","#F59E0B","#10B981","#8B5CF6","#06B6D4","#F97316","#EC4899","#14B8A6","#6366F1","#F43F5E","#22D3EE","#A855F7"];
+const SC={pending:C.td,casting:C.or,machining:C.bl,vibratory:C.pu,painting:C.cy,lab:"#A78BFA",complete:C.gn};
 
-// ═══════════════════════════════════════════════════════
-function CastFlow(){
-  const[page,setPage]=useState("home");
+// ═══ TRANSLATIONS ═══
+const T={en:{
+app:"CastFlow — NIDC",dashboard:"Dashboard",castGantt:"Machine Gantt",orders:"Orders",targets:"$45K Target",scheduling:"Scheduling",painting:"Painting",machines:"Machines",people:"People",planning:"Planning",aiPlan:"AI Planner",aiChat:"AI Chat",
+upload:"Upload Weekly Schedule",drop:"Drop .xlsx or click",weekOf:"Week of",
+total:"Total Jobs",profit:"Revenue Pipeline",scrap:"Scrap 10%",
+partName:"Part",die:"Die #",qty:"Qty",balance:"Balance",profitU:"$/Unit",due:"Due",priority:"Priority",status:"Status",caster:"Machine",actions:"",shopOrder:"S.O.#",
+casting:"Casting",machining:"Machining",vibratory:"Vibratory",lab:"Lab/QC",painting2:"Painting",complete:"Complete",pending:"Pending",
+urgent:"URGENT",high:"High",normal:"Normal",
+edit:"Edit",del:"Delete",dup:"Copy",save:"Save",cancel:"Cancel",add:"+ Add Job",search:"Search...",
+run:"Auto-Schedule",optimizing:"Optimizing...",
+overdue:"Overdue",onTrack:"On Track",noUrgent:"No urgent parts",notes:"Notes",
+first:"1st",second:"2nd",jobs:"jobs",pcs:"pcs",hrs:"hrs",
+zinc:"Zinc Cold Chamber",al400:"Aluminum 400T",al600:"Aluminum 600T",al800:"Aluminum 800T",autoFan:"Auto Fan",
+running:"Running",idle:"Idle",maint:"Maintenance",dieChg:"Die Change",machDown:"MACHINE DOWN",noJobs:"No jobs",
+dieChanges:"Die Changes This Week",estDowntime:"Est. Downtime",changes:"die changes",noChanges:"No changes",
+paintDept:"Painting (Off-site)",alerts:"Alerts",
+target:"Daily: $45,000",projected:"Projected/Day",today:"Actual Today",targetMet:"TARGET MET",below:"BELOW TARGET",
+guide:"Worker Production Guide",dailyPcs:"Pcs/Day",revDay:"$/Day",pctTarget:"%",actual:"Actual",weekTrend:"Weekly Trend",
+noData:"Upload your weekly Production Schedule to get started",
+saved:"Saved!",deleted:"Deleted",duplicated:"Copied!",scheduled:"Schedule optimized!",confirmDel:"Delete this job?",yes:"Yes",no:"No",loading:"Reading Excel...",
+// People
+workers:"Workers",supervisors:"Supervisors",addWorker:"+ Add Worker",addSuper:"+ Add Supervisor",
+workerName:"Name",workerMachine:"Assigned Machine",workerShift:"Shift",workerLang:"Language",workerRole:"Role",
+operator:"Operator",supervisor:"Supervisor",lead:"Lead",
+shift1:"1st Shift",shift2:"2nd Shift",
+// Planning
+planTitle:"Weekly Planning Intelligence",atRiskParts:"At-Risk Parts (may miss deadline)",dieChangeSchedule:"Die Change Schedule",
+machineLoading:"Machine Loading",downtimeWindows:"Available Downtime Windows",dailyBreakdown:"Daily Revenue Breakdown",
+risk:"Risk",shiftsNeeded:"shifts needed",onlyHave:"only have",available:"available",
+totalDieChanges:"Total Die Changes",totalDowntimeHrs:"Total Downtime Hours",
+heavily:"Heavily Loaded",balanced:"Balanced",light:"Light Load",empty:"Empty",
+},es:{
+app:"CastFlow — NIDC",dashboard:"Tablero",castGantt:"Gantt Máquinas",orders:"Órdenes",targets:"Meta $45K",scheduling:"Programación",painting:"Pintura",machines:"Máquinas",people:"Personal",planning:"Planificación",aiPlan:"Planificador AI",aiChat:"Chat AI",
+upload:"Subir Programa Semanal",drop:"Arrastra .xlsx o haz clic",weekOf:"Semana del",
+total:"Total Trabajos",profit:"Ingresos en Proceso",scrap:"Desperdicio 10%",
+partName:"Parte",die:"Molde #",qty:"Cant.",balance:"Balance",profitU:"$/U",due:"Fecha",priority:"Prioridad",status:"Estado",caster:"Máquina",actions:"",shopOrder:"O.T.#",
+casting:"Fundición",machining:"Maquinado",vibratory:"Vibratorio",lab:"Lab/QC",painting2:"Pintura",complete:"Completo",pending:"Pendiente",
+urgent:"URGENTE",high:"Alta",normal:"Normal",
+edit:"Editar",del:"Eliminar",dup:"Copiar",save:"Guardar",cancel:"Cancelar",add:"+ Agregar",search:"Buscar...",
+run:"Auto-Programar",optimizing:"Optimizando...",
+overdue:"Atrasado",onTrack:"A Tiempo",noUrgent:"Sin partes urgentes",notes:"Notas",
+first:"1ro",second:"2do",jobs:"trabajos",pcs:"pzas",hrs:"hrs",
+zinc:"Zinc Cámara Fría",al400:"Aluminio 400T",al600:"Aluminio 600T",al800:"Aluminio 800T",autoFan:"Auto Ventilador",
+running:"En Marcha",idle:"Inactiva",maint:"Mantenimiento",dieChg:"Cambio Molde",machDown:"MÁQUINA PARADA",noJobs:"Sin trabajos",
+dieChanges:"Cambios de Molde Esta Semana",estDowntime:"Tiempo Muerto Est.",changes:"cambios de molde",noChanges:"Sin cambios",
+paintDept:"Pintura (Externo)",alerts:"Alertas",
+target:"Diario: $45,000",projected:"Proyectado/Día",today:"Real Hoy",targetMet:"META CUMPLIDA",below:"DEBAJO DE META",
+guide:"Guía de Producción",dailyPcs:"Pzas/Día",revDay:"$/Día",pctTarget:"%",actual:"Real",weekTrend:"Tendencia Semanal",
+noData:"Sube tu Programa de Producción semanal para empezar",
+saved:"¡Guardado!",deleted:"Eliminado",duplicated:"¡Copiado!",scheduled:"¡Programa optimizado!",confirmDel:"¿Eliminar?",yes:"Sí",no:"No",loading:"Leyendo Excel...",
+workers:"Trabajadores",supervisors:"Supervisores",addWorker:"+ Agregar Trabajador",addSuper:"+ Agregar Supervisor",
+workerName:"Nombre",workerMachine:"Máquina Asignada",workerShift:"Turno",workerLang:"Idioma",workerRole:"Rol",
+operator:"Operador",supervisor:"Supervisor",lead:"Líder",
+shift1:"1er Turno",shift2:"2do Turno",
+planTitle:"Inteligencia de Planificación Semanal",atRiskParts:"Partes en Riesgo (pueden no cumplir fecha)",dieChangeSchedule:"Programa de Cambio de Molde",
+machineLoading:"Carga de Máquinas",downtimeWindows:"Ventanas de Tiempo Muerto Disponibles",dailyBreakdown:"Desglose Diario de Ingresos",
+risk:"Riesgo",shiftsNeeded:"turnos necesarios",onlyHave:"solo tiene",available:"disponible",
+totalDieChanges:"Total Cambios Molde",totalDowntimeHrs:"Total Horas Tiempo Muerto",
+heavily:"Carga Alta",balanced:"Balanceada",light:"Carga Baja",empty:"Vacía",
+}};
+
+const MACH_LIST=["M2","M3","M4","M5","M6","M7","M8","M9","M10","M11","M12","M13","M14"];
+const MI={M2:{type:"zinc",ton:0,dch:4},M3:{type:"zinc",ton:0,dch:4},M4:{type:"al400",ton:400,dch:4},M5:{type:"al400",ton:400,dch:4},M6:{type:"al400",ton:400,dch:4},M7:{type:"al400",ton:400,dch:4},M8:{type:"al400",ton:400,dch:4},M9:{type:"al400",ton:400,dch:4},M10:{type:"al400",ton:400,dch:4},M11:{type:"autoFan",ton:400,dch:5},M12:{type:"al600",ton:600,dch:5},M13:{type:"al600",ton:600,dch:5},M14:{type:"al800",ton:800,dch:5}};
+const HAAS=["Haas 1","Haas 2","Haas 3","Haas 4","Haas 5","Hand Dip"];
+
+// Default workers/supervisors
+const DEF_WORKERS=[
+  {id:"W1",name:"",machine:"M4",shift:1,lang:"es",role:"operator"},
+  {id:"W2",name:"",machine:"M5",shift:1,lang:"es",role:"operator"},
+  {id:"W3",name:"",machine:"M6",shift:1,lang:"es",role:"operator"},
+  {id:"W4",name:"",machine:"M7",shift:1,lang:"es",role:"operator"},
+  {id:"W5",name:"",machine:"M10",shift:1,lang:"es",role:"operator"},
+  {id:"W6",name:"",machine:"M11",shift:1,lang:"es",role:"operator"},
+  {id:"W7",name:"",machine:"M12",shift:1,lang:"es",role:"operator"},
+  {id:"W8",name:"",machine:"M13",shift:1,lang:"es",role:"operator"},
+  {id:"W9",name:"",machine:"M14",shift:1,lang:"es",role:"operator"},
+  {id:"W10",name:"",machine:"M4",shift:2,lang:"es",role:"operator"},
+  {id:"W11",name:"",machine:"M5",shift:2,lang:"es",role:"operator"},
+];
+const DEF_SUPERS=[
+  {id:"S1",name:"",machines:["M2","M3","M4","M5","M6"],shift:1,role:"supervisor"},
+  {id:"S2",name:"",machines:["M7","M8","M9","M10"],shift:1,role:"supervisor"},
+  {id:"S3",name:"",machines:["M11","M12","M13","M14"],shift:1,role:"supervisor"},
+  {id:"S4",name:"",machines:["M2","M3","M4","M5","M6","M7","M8","M9","M10","M11","M12","M13","M14"],shift:2,role:"supervisor"},
+];
+
+// ═══ STYLES ═══
+const cd=(x={})=>({background:C.sf,border:`1px solid ${C.bd}`,borderRadius:10,padding:16,...x});
+const bt=(v="d")=>({padding:"5px 10px",borderRadius:6,border:v==="o"?`1px solid ${C.bd2}`:"none",background:v==="p"?C.ac:v==="x"?C.ur:v==="o"?"transparent":C.sf2,color:v==="p"?"#000":v==="x"?"#fff":C.tx,fontWeight:600,fontSize:10,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:3});
+const inp={padding:"5px 8px",borderRadius:5,border:`1px solid ${C.bd2}`,background:C.sf2,color:C.tx,fontSize:11,outline:"none",width:"100%"};
+const thS={padding:"6px 8px",textAlign:"left",fontSize:8,fontWeight:700,textTransform:"uppercase",color:C.tm,borderBottom:`2px solid ${C.bd}`,position:"sticky",top:0,background:C.sf,zIndex:1};
+const tdS={padding:"5px 8px",fontSize:10,color:C.tx,borderBottom:`1px solid ${C.bd}`};
+const pill=a=>({padding:"5px 10px",borderRadius:6,background:a?C.ac:"transparent",color:a?"#000":C.tm,fontWeight:a?700:500,fontSize:10,border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:3,whiteSpace:"nowrap"});
+
+// Editable Cell
+const EC=({value:v,onChange:oc,type:ty="text",options:opts,color:cl})=>{
+  const[ed,setEd]=useState(false);const[val,setVal]=useState(v);const r=useRef();
+  useEffect(()=>setVal(v),[v]);useEffect(()=>{if(ed&&r.current)r.current.focus()},[ed]);
+  const commit=()=>{setEd(false);if(val!==v)oc(ty==="number"?parseFloat(val)||0:val)};
+  if(opts)return<select value={v} onChange={e=>oc(e.target.value)} style={{background:C.sf3,color:cl||C.tx,border:`1px solid ${C.bd}`,borderRadius:4,padding:"2px 3px",fontSize:9,cursor:"pointer",outline:"none"}}>{opts.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}</select>;
+  if(ed)return<input ref={r} type={ty} value={val} onChange={e=>setVal(e.target.value)} onBlur={commit} onKeyDown={e=>{if(e.key==="Enter")commit();if(e.key==="Escape"){setVal(v);setEd(false)}}} style={{background:C.sf3,color:C.tx,border:`1px solid ${C.ac}`,borderRadius:4,padding:"2px 4px",fontSize:9,outline:"none",width:"100%"}}/>;
+  return<span onClick={()=>setEd(true)} style={{cursor:"pointer",borderBottom:`1px dashed ${C.bd2}`,color:cl||C.tx,fontSize:10}}>{v===""||v==null?"—":typeof v==="number"?v.toLocaleString():v}</span>;
+};
+
+const Modal=({open,onClose,title,ch})=>{if(!open)return null;
+  return<div style={{position:"fixed",inset:0,zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={onClose}>
+    <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,.7)"}}/>
+    <div onClick={e=>e.stopPropagation()} style={{position:"relative",background:C.sf,border:`1px solid ${C.bd}`,borderRadius:12,padding:18,width:"90%",maxWidth:480,maxHeight:"80vh",overflowY:"auto"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <span style={{fontSize:14,fontWeight:800,color:C.tx}}>{title}</span>
+        <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",color:C.tm,fontSize:16}}>✕</button>
+      </div>{ch}
+    </div>
+  </div>;
+};
+
+const ShiftCell=({value:v,color:cl,onChange:oc})=>{
+  const[ed,setEd]=useState(false);const[val,setVal]=useState(v);
+  if(ed)return<input autoFocus type="number" value={val} onChange={e=>setVal(e.target.value)} onBlur={()=>{setEd(false);oc(parseInt(val)||0)}} onKeyDown={e=>{if(e.key==="Enter"){setEd(false);oc(parseInt(val)||0)}}} style={{width:28,height:22,borderRadius:4,border:`2px solid ${C.ac}`,background:C.sf3,color:C.tx,fontSize:10,fontWeight:800,textAlign:"center",outline:"none"}}/>;
+  if(v>0)return<div onClick={()=>{setVal(v);setEd(true)}} style={{width:28,height:22,borderRadius:5,background:`linear-gradient(145deg,${cl}EE,${cl}AA)`,border:`1px solid ${cl}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,color:"#fff",cursor:"pointer",boxShadow:`0 1px 5px ${cl}40`,position:"relative",overflow:"hidden"}}><div style={{position:"absolute",top:0,left:0,right:0,height:"40%",background:"linear-gradient(180deg,rgba(255,255,255,.12),transparent)"}}/>{v}</div>;
+  return<span style={{fontSize:7,color:`${C.td}40`}}>·</span>;
+};
+
+const Chart=({data,w:W=600,h:H=180})=>{
+  const p={t:20,r:20,b:26,l:44};const iw=W-p.l-p.r;const ih=H-p.t-p.b;
+  const mx=Math.max(55e3,...data.map(d=>Math.max(d.a||0,d.t)));
+  const xS=iw/Math.max(1,data.length-1);const yS=v=>ih-(v/mx)*ih;
+  const aP=data.map((d,i)=>`${p.l+i*xS},${p.t+yS(d.a||0)}`).join(" ");
+  return<svg width={W} height={H} style={{overflow:"visible"}}>
+    {[0,15e3,30e3,45e3].map((v,i)=><g key={i}><line x1={p.l} y1={p.t+yS(v)} x2={p.l+iw} y2={p.t+yS(v)} stroke={v===45e3?C.ac:C.bd} strokeDasharray={v===45e3?"":"4,4"} strokeWidth={v===45e3?2:1}/><text x={p.l-4} y={p.t+yS(v)+3} textAnchor="end" fill={v===45e3?C.ac:C.td} fontSize={7}>${(v/1e3).toFixed(0)}K</text></g>)}
+    <polygon points={`${p.l},${p.t+ih} ${aP} ${p.l+(data.length-1)*xS},${p.t+ih}`} fill={`${C.gn}10`}/>
+    <polyline points={data.map((d,i)=>`${p.l+i*xS},${p.t+yS(d.t)}`).join(" ")} fill="none" stroke={C.ac} strokeWidth={2} strokeDasharray="6,3"/>
+    <polyline points={aP} fill="none" stroke={C.gn} strokeWidth={2} strokeLinecap="round"/>
+    {data.map((d,i)=>{const cx=p.l+i*xS;const cy=p.t+yS(d.a||0);const ok=(d.a||0)>=d.t;
+      return<g key={i}><circle cx={cx} cy={cy} r={3} fill={ok?C.gn:C.ur} stroke={C.sf} strokeWidth={1.5}/><text x={cx} y={cy-7} textAnchor="middle" fill={ok?C.gn:C.ur} fontSize={7} fontWeight={700}>${((d.a||0)/1e3).toFixed(1)}K</text><text x={cx} y={p.t+ih+10} textAnchor="middle" fill={C.tm} fontSize={7}>{d.l}</text></g>})}
+  </svg>;
+};
+
+// ═══════════════════════════════════════════════════════════
+// MAIN APP
+// ═══════════════════════════════════════════════════════════
   const[lang,setLang]=useState("en");
-  const[allOrders,setAllOrders]=useState([]); // raw shipping data
-  const[weekPlan,setWeekPlan]=useState(null); // AI-generated plan
-  const[selectedWeek,setSelectedWeek]=useState(""); // "2026-03-17"
+  const[page,setPage]=useState("dashboard");
+  const[orders,setOrders]=useState([]);
+  const[weekDates,setWeekDates]=useState(["Mon","Tue","Wed","Thu","Fri","Sat"]);
+  const[weekLabel,setWeekLabel]=useState("");
   const[fileName,setFileName]=useState("");
+  const[workers,setWorkers]=useState(DEF_WORKERS);
+  const[supers,setSupers]=useState(DEF_SUPERS);
+  const[editId,setEditId]=useState(null);
+  const[delId,setDelId]=useState(null);
+  const[showAdd,setShowAdd]=useState(false);
+  const[isOpt,setIsOpt]=useState(false);
+  const[showNotif,setShowNotif]=useState(false);
   const[toast,setToast]=useState(null);
-  const[aiLoading,setAiLoading]=useState(false);
-  const[aiChat,setAiChat]=useState([]); // conversation with AI
-  const[userMsg,setUserMsg]=useState("");
+  const[actProd,setActProd]=useState({});
+  const[search,setSearch]=useState("");
+  const[isLoading,setIsLoading]=useState(false);
+  const[dbStatus,setDbStatus]=useState("loading");
   const fileRef=useRef();
-  const flash=m=>{setToast(m);setTimeout(()=>setToast(null),2500)};
+  const t=T[lang];
+  const flash=m=>{setToast(m);setTimeout(()=>setToast(null),2e3)};
 
-  // Get current Monday
-  const getMonday=(d=new Date())=>{const day=d.getDay();const diff=d.getDate()-day+(day===0?-6:1);return new Date(d.setDate(diff)).toISOString().split("T")[0]};
-
-  useEffect(()=>{setSelectedWeek(getMonday())},[]);
-
-  // ─── Parse Shipping Schedule ──────────────────────────
-  const handleFile=useCallback(async f=>{
-    if(!f)return;setFileName(f.name);
-    try{
-      const XLSX=await import("xlsx");
-      const buf=await f.arrayBuffer();
-      const wb=XLSX.read(buf,{type:"array",cellDates:true});
-      const sn=wb.SheetNames.find(s=>s.toLowerCase().includes("product"))||wb.SheetNames[0];
-      const raw=XLSX.utils.sheet_to_json(wb.Sheets[sn]);
-      
-      const orders=raw.filter(r=>r["Product Number"]&&r["Needed"]>0).map((r,i)=>({
-        id:`O${i}`,
-        product:String(r["Product Number"]||""),
-        customer:String(r["Cust Name"]||""),
-        description:String(r["Description"]||""),
-        material:String(r["Material"]||""),
-        dcm:String(r["DCM"]||""),
-        die:String(r["Die #"]||""),
-        po:String(r["Customer PO "]||r["Customer PO"]||""),
-        shipDate:r["Ship Date"] instanceof Date?r["Ship Date"].toISOString().split("T")[0]:"",
-        qty:Number(r["Quantity"])||0,
-        shipped:Number(r["Shipped"])||0,
-        toShip:Number(r["To Ship"])||0,
-        onHand:Number(r["On Hand"])||0,
-        needed:Number(r["Needed"])||0,
-        dollars:Number(r["Ext Dollars"])||0,
-        machines:DCM_MAP[String(r["DCM"]||"")]||[],
-        isCastable:!["FIN","ASY",""].includes(String(r["DCM"]||"")),
-      }));
-      
-      setAllOrders(orders);
-      setPage("dashboard");
-      flash(`${orders.length} orders loaded! $${(orders.reduce((a,o)=>a+o.dollars,0)/1e3).toFixed(0)}K pipeline`);
-    }catch(e){console.error(e);alert("Error: "+e.message)}
+  // ─── Load from Supabase on mount ─────────────────────
+  useEffect(()=>{
+    (async()=>{
+      try{
+        // Load latest week schedule
+        const ws=await db.get("week_schedule","?order=created_at.desc&limit=1");
+        if(ws?.[0]){
+          const wd=typeof ws[0].week_dates==="string"?JSON.parse(ws[0].week_dates):ws[0].week_dates;
+          if(wd?.length)setWeekDates(wd);
+          if(ws[0].file_name)setFileName(ws[0].file_name);
+          if(wd?.[0])setWeekLabel(wd[0]);
+        }
+        // Load jobs
+        const jobs=await db.get("jobs","?order=machine.asc,created_at.asc");
+        if(jobs?.length){
+          setOrders(jobs.map(j=>({
+            id:j.id,partName:j.part,die:j.die||"",quantity:j.balance||0,
+            castQuantity:Math.ceil((j.balance||0)*1.1),
+            profitPerUnit:j.profit_per_unit||0,totalProfit:((j.balance||0)*(j.profit_per_unit||0)).toFixed(2),
+            priority:j.priority||"normal",status:j.status||"pending",
+            assignedCaster:j.assigned_caster||j.machine,machine:j.machine,
+            needsHaas:j.needs_haas||false,needsPaint:j.needs_paint||false,
+            batchGroup:j.die||j.part,notes:j.notes||"",shopOrder:j.shop_order||"",
+            shifts:typeof j.shifts==="string"?JSON.parse(j.shifts):(j.shifts||[[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]),
+            isDown:j.is_down||false,
+            hasWork:(typeof j.shifts==="string"?JSON.parse(j.shifts):(j.shifts||[])).some(s=>s[0]>0||s[1]>0),
+            totalShifts:(typeof j.shifts==="string"?JSON.parse(j.shifts):(j.shifts||[])).reduce((a,s)=>a+s[0]+s[1],0),
+            machineType:MI[j.machine]?.type||"al400",
+          })));
+          setPage("dashboard");
+        }
+        // Load workers
+        const crew=await db.get("crew_assignments","?order=machine.asc");
+        if(crew?.length){
+          const w=crew.filter(c=>c.role==="operator").map(c=>({id:c.id,name:c.name||"",machine:c.machine,shift:c.shift,lang:"es",role:c.role}));
+          const s=crew.filter(c=>c.role==="supervisor").map(c=>({id:c.id,name:c.name||"",machines:MACH_LIST,shift:c.shift,role:c.role}));
+          if(w.length)setWorkers(w);
+          if(s.length)setSupers(s);
+        }
+        setDbStatus("connected");
+      }catch(e){console.error("DB load error:",e);setDbStatus("offline")}
+    })();
   },[]);
 
-  // ─── AI Schedule Generator ────────────────────────────
-  const generateAiSchedule=useCallback(async(weekStart)=>{
-    if(!allOrders.length)return;
-    setAiLoading(true);
-    
-    // Get orders that need production for this week and beyond
-    const castable=allOrders.filter(o=>o.isCastable&&o.needed>0);
-    const weekEnd=new Date(weekStart);weekEnd.setDate(weekEnd.getDate()+6);
-    
-    // Sort by urgency: overdue first, then by ship date
-    const sorted=[...castable].sort((a,b)=>(a.shipDate||"9999").localeCompare(b.shipDate||"9999"));
-    const urgent=sorted.filter(o=>new Date(o.shipDate)<=weekEnd);
-    const upcoming=sorted.filter(o=>new Date(o.shipDate)>weekEnd).slice(0,30);
-    
-    const orderList=[...urgent,...upcoming].slice(0,50).map(o=>
-      `${o.product} | Die:${o.die||"?"} | DCM:${o.dcm} | Need:${o.needed} | Ship:${o.shipDate} | $${o.dollars.toFixed(0)} | ${o.customer} | Machines:${o.machines.join(",")}`
-    ).join("\n");
+  const[shippingOrders,setShippingOrders]=useState([]); // raw shipping data
+  const[aiChat,setAiChat]=useState([]);
+  const[userMsg,setUserMsg]=useState("");
+  const DCM_MAP={"200":["M2","M3"],"400":["M4","M5","M6","M7","M9","M10"],"500":["M4","M5","M6","M7","M9","M10"],"600":["M12","M13"],"700":["M4","M5","M6","M7","M9","M10","M12","M13"],"800":["M14"],"1K":["M14"]};
 
-    const prompt=`You are an AI production scheduler for NIDC, an aluminum die casting company.
-
-MACHINES (available this week):
-M2,M3: Zinc cold chamber (~500 pcs/shift)
-M4,M5,M6,M7,M9,M10: Aluminum 400T (~350-400 pcs/shift)  
-M8: DOWN — do not use
-M11: Auto Fan 400T (~350 pcs/shift)
-M12,M13: Aluminum 600T (~250 pcs/shift)
-M14: Aluminum 800T (~150 pcs/shift)
-
-SCHEDULE: Monday to Friday
-- Monday-Thursday: ALL machines run, 2 shifts each (1st shift + 2nd shift)
-- FRIDAY: Only 2-3 machines run (limited crew), 1 shift only
-- Die changes take 3-5 hours = lost production
-
-WEEK: ${weekStart} to ${new Date(new Date(weekStart).getTime()+4*864e5).toISOString().split("T")[0]}
-
-ORDERS TO SCHEDULE (sorted by urgency):
-${orderList}
-
-RULES:
-1. Group same-die parts on same machine to avoid die changes
-2. Overdue orders (ship date before ${weekStart}) are URGENT — schedule first
-3. High-dollar orders get priority
-4. Friday: pick 2-3 most critical machines only, 1st shift only
-5. Don't overschedule — each machine has ~${350} pcs/shift capacity average
-6. Consider die change time when switching dies on a machine
-
-RESPOND IN THIS EXACT JSON FORMAT ONLY (no markdown, no backticks, no explanation outside JSON):
-{
-  "schedule":[
-    {"machine":"M4","day":"Mon","shift":1,"product":"PartNum","die":"D123","qty":400,"hours":8},
-    {"machine":"M4","day":"Mon","shift":2,"product":"PartNum","die":"D123","qty":350,"hours":8}
-  ],
-  "die_changes":[
-    {"machine":"M4","day":"Tue","from":"D123","to":"D456","hours":4}
-  ],
-  "friday_machines":["M12","M14"],
-  "daily_revenue":{"Mon":45000,"Tue":43000,"Wed":47000,"Thu":44000,"Fri":15000},
-  "warnings":["Warning 1","Warning 2"],
-  "recommendations":["Recommendation 1"],
-  "summary":"2-3 sentence summary of the plan"
-}`;
-
+  // ─── Excel Upload (detects both formats) ──────────────
+  const handleFile=useCallback(async f=>{
+    if(!f)return;setFileName(f.name);setIsLoading(true);
     try{
-      const resp=await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:3000,messages:[{role:"user",content:prompt}]})
-      });
-      const data=await resp.json();
-      const text=data.content?.map(c=>c.text||"").join("")||"";
-      const clean=text.replace(/```json|```/g,"").trim();
-      const plan=JSON.parse(clean);
-      plan.weekStart=weekStart;
-      setWeekPlan(plan);
-      setPage("gantt");
-      setAiChat(prev=>[...prev,{role:"ai",text:plan.summary||"Schedule generated."}]);
-    }catch(e){
-      console.error(e);
-      setAiChat(prev=>[...prev,{role:"ai",text:"Error generating schedule. Try again."}]);
-    }finally{setAiLoading(false)}
-  },[allOrders]);
+      const buf=await f.arrayBuffer();const XLSX=await import("xlsx");const wb=XLSX.read(buf,{type:"array",cellDates:true});
+      
+      // DETECT FORMAT: Shipping Schedule has "Product Number" column
+      const firstSheet=wb.SheetNames[0];
+      const testRow=XLSX.utils.sheet_to_json(wb.Sheets[firstSheet],{header:1})[0]||[];
+      const isShipping=testRow.some(v=>String(v).includes("Product Number"));
+      
+      if(isShipping){
+        // ═══ SHIPPING SCHEDULE FORMAT ═══
+        const sn=wb.SheetNames.find(s=>s.toLowerCase().includes("product"))||firstSheet;
+        const raw=XLSX.utils.sheet_to_json(wb.Sheets[sn]);
+        const shipOrders=raw.filter(r=>r["Product Number"]&&(r["Needed"]>0||r["To Ship"]>0)).map((r,i)=>({
+          id:`SO${i}`,product:String(r["Product Number"]||""),customer:String(r["Cust Name"]||""),
+          description:String(r["Description"]||""),material:String(r["Material"]||""),
+          dcm:String(r["DCM"]||""),die:String(r["Die #"]||""),po:String(r["Customer PO "]||r["Customer PO"]||""),
+          shipDate:r["Ship Date"] instanceof Date?r["Ship Date"].toISOString().split("T")[0]:"",
+          qty:Number(r["Quantity"])||0,shipped:Number(r["Shipped"])||0,toShip:Number(r["To Ship"])||0,
+          onHand:Number(r["On Hand"])||0,needed:Number(r["Needed"])||0,dollars:Number(r["Ext Dollars"])||0,
+          machines:DCM_MAP[String(r["DCM"]||"")]||[],
+          isCastable:!["FIN","ASY",""].includes(String(r["DCM"]||"")),
+        }));
+        setShippingOrders(shipOrders);
+        // Also create orders for the app from shipping data (castable items with need>0)
+        const castable=shipOrders.filter(o=>o.isCastable&&o.needed>0);
+        const newO=castable.map((o,i)=>{
+          const mt=o.dcm==="200"?"zinc":o.dcm==="800"||o.dcm==="1K"?"al800":o.dcm==="600"?"al600":"al400";
+          return{id:`J${Date.now()}-${i}`,partName:o.product,die:o.die,quantity:o.needed,castQuantity:Math.ceil(o.needed*1.1),
+            profitPerUnit:o.needed>0?+(o.dollars/o.needed).toFixed(2):0,totalProfit:o.dollars.toFixed(2),
+            priority:new Date(o.shipDate)<new Date()?"urgent":o.needed>3000?"high":"normal",
+            status:"pending",assignedCaster:o.machines[0]||"M4",needsHaas:i%3!==0,needsPaint:i%4===0,
+            batchGroup:o.die||o.product,notes:`${o.customer} | PO:${o.po} | Ship:${o.shipDate}`,
+            shopOrder:o.po,shifts:[[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]],isDown:false,hasWork:false,
+            machine:o.machines[0]||"M4",totalShifts:0,machineType:mt,
+            shipDate:o.shipDate,customer:o.customer,dollars:o.dollars,dcm:o.dcm,
+          };
+        });
+        setOrders(newO);setPage("dashboard");
+        flash(`${shipOrders.length} shipping orders loaded! ${castable.length} need casting. $${(shipOrders.reduce((a,o)=>a+o.dollars,0)/1e3).toFixed(0)}K pipeline`);
+      } else {
+        // ═══ PRODUCTION SCHEDULE FORMAT (original) ═══
+        const sn=wb.SheetNames.find(s=>s.toLowerCase().includes("casting sched"))||firstSheet;
+        const raw=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:""});
+        const dr=raw[1]||[];const wd=[];
+        for(let c=8;c<=18;c+=2){const v=dr[c];
+          if(v instanceof Date){wd.push(v.toLocaleDateString("en-US",{weekday:"short",month:"numeric",day:"numeric"}))}
+          else if(typeof v==="number"&&v>40000){const d=new Date((v-25569)*864e5);wd.push(d.toLocaleDateString("en-US",{weekday:"short",month:"numeric",day:"numeric"}))}
+          else if(typeof v==="string"&&v){try{const d=new Date(v);if(!isNaN(d))wd.push(d.toLocaleDateString("en-US",{weekday:"short",month:"numeric",day:"numeric"}));else wd.push(`Day ${wd.length+1}`)}catch{wd.push(`Day ${wd.length+1}`)}}
+          else wd.push(`Day ${wd.length+1}`)}
+        setWeekDates(wd);setWeekLabel(wd[0]||"");
+        const newO=[];let cm="";
+        for(let i=2;i<raw.length;i++){
+          const r=raw[i];if(!r||r.length<6)continue;
+          const mc=String(r[0]||"").trim();if(/^M\d+/.test(mc))cm=mc;if(!cm)continue;
+          const p=String(r[4]||"").trim(),so=String(r[3]||"").trim(),d=String(r[5]||"").trim(),b=parseInt(r[6])||0;
+          if((!p||p==="0")&&b===0)continue;if(p==="0"&&d==="0"&&b===0)continue;
+          const sh=[];for(let x=0;x<6;x++)sh.push([parseInt(r[8+x*2])||0,parseInt(r[9+x*2])||0]);
+          const isDown=p.toLowerCase().includes("machine down");const hasWork=sh.some(s=>s[0]>0||s[1]>0);
+          if(!isDown&&!hasWork&&b===0)continue;
+          const totalShifts=sh.reduce((a,s)=>a+s[0]+s[1],0);
+          newO.push({id:`J${Date.now()}-${i}`,partName:p,die:d!=="0"?d:"",quantity:b,castQuantity:Math.ceil(b*1.1),
+            profitPerUnit:+((b*0.006+1.5).toFixed(2)),totalProfit:(b*(b*0.006+1.5)).toFixed(2),
+            priority:b>4000?"high":"normal",status:hasWork?"casting":"pending",
+            assignedCaster:cm,needsHaas:i%3!==0,needsPaint:i%4===0,batchGroup:d||p,
+            notes:"",shopOrder:so!=="0"?so:"",shifts:sh,isDown,hasWork,machine:cm,totalShifts,
+            machineType:MI[cm]?.type||"al400",
+          });
+        }
+        setOrders(newO);setPage("planning");setActProd({});
+      // Save to Supabase
+      try{
+        const weekStart=wd[0]||"unknown";
+        // Clear old jobs and save new ones
+        await db.delWhere("jobs","week_start",weekStart);
+        const dbJobs=newO.map(o=>({machine:o.assignedCaster||o.machine,shop_order:o.shopOrder||"",part:o.partName,die:o.die||"",balance:o.quantity||0,priority:o.priority,status:o.status,assigned_caster:o.assignedCaster,shifts:JSON.stringify(o.shifts),is_down:o.isDown||false,profit_per_unit:o.profitPerUnit||0,needs_haas:o.needsHaas||false,needs_paint:o.needsPaint||false,week_start:weekStart,notes:""}));
+        if(dbJobs.length)await db.insert("jobs",dbJobs);
+        // Save week metadata
+        await db.insert("week_schedule",[{week_start:weekStart,week_dates:JSON.stringify(wd),file_name:f.name}]);
+        setDbStatus("connected");
+        // Reload to get server-generated IDs
+        const saved=await db.get("jobs","?order=machine.asc,created_at.asc&week_start=eq."+encodeURIComponent(weekStart));
+        if(saved?.length){setOrders(saved.map(j=>({id:j.id,partName:j.part,die:j.die||"",quantity:j.balance||0,castQuantity:Math.ceil((j.balance||0)*1.1),profitPerUnit:j.profit_per_unit||0,totalProfit:((j.balance||0)*(j.profit_per_unit||0)).toFixed(2),priority:j.priority||"normal",status:j.status||"pending",assignedCaster:j.assigned_caster||j.machine,machine:j.machine,needsHaas:j.needs_haas||false,needsPaint:j.needs_paint||false,batchGroup:j.die||j.part,notes:j.notes||"",shopOrder:j.shop_order||"",shifts:typeof j.shifts==="string"?JSON.parse(j.shifts):(j.shifts||[[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]),isDown:j.is_down||false,hasWork:(typeof j.shifts==="string"?JSON.parse(j.shifts):(j.shifts||[])).some(s=>s[0]>0||s[1]>0),totalShifts:(typeof j.shifts==="string"?JSON.parse(j.shifts):(j.shifts||[])).reduce((a,s)=>a+s[0]+s[1],0),machineType:MI[j.machine]?.type||"al400"})))}
+      }catch(e){console.error("DB save error:",e);setDbStatus("offline")}
+      flash(`${newO.filter(o=>!o.isDown).length} ${t.jobs} loaded!`);
+      } // end else (production schedule)
+    }catch(err){console.error(err);alert("Error: "+err.message)}finally{setIsLoading(false)}
+  },[t]);
 
-  // ─── AI Chat ──────────────────────────────────────────
-  const sendAiMessage=async()=>{
-    if(!userMsg.trim())return;
-    const msg=userMsg.trim();setUserMsg("");
-    setAiChat(prev=>[...prev,{role:"user",text:msg}]);
-    setAiLoading(true);
-    
-    const context=weekPlan?`Current schedule has ${weekPlan.schedule?.length||0} assignments. `:"No schedule yet. ";
-    const orderContext=`${allOrders.length} total orders, ${allOrders.filter(o=>o.isCastable&&o.needed>0).length} need casting.`;
-    
-    try{
-      const resp=await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,
-          messages:[{role:"user",content:`You are an AI assistant for NIDC die casting production planning. ${context}${orderContext}\n\nUser question: ${msg}\n\nAnswer concisely and helpfully. If they ask about scheduling, reference the NIDC machines (M2-M14), die changes (3-5hrs), shifts (2/day Mon-Thu, Fri limited). Keep answer under 200 words.`}]
-        })
-      });
-      const data=await resp.json();
-      const text=data.content?.map(c=>c.text||"").join("")||"No response";
-      setAiChat(prev=>[...prev,{role:"ai",text}]);
-    }catch{
-      setAiChat(prev=>[...prev,{role:"ai",text:"Error connecting to AI."}]);
-    }finally{setAiLoading(false)}
-  };
+  // ─── CRUD (with Supabase sync) ─────────────────────────
+  const upd=useCallback((id,u)=>{
+    setOrders(p=>p.map(o=>{if(o.id!==id)return o;const n={...o,...u};if(u.quantity!==undefined){n.castQuantity=Math.ceil(n.quantity*1.1);n.totalProfit=(n.quantity*n.profitPerUnit).toFixed(2)}return n}));
+    // Sync to DB
+    const dbu={};
+    if(u.partName!==undefined)dbu.part=u.partName;if(u.die!==undefined)dbu.die=u.die;
+    if(u.quantity!==undefined)dbu.balance=u.quantity;if(u.priority!==undefined)dbu.priority=u.priority;
+    if(u.status!==undefined)dbu.status=u.status;if(u.assignedCaster!==undefined)dbu.assigned_caster=u.assignedCaster;
+    if(u.notes!==undefined)dbu.notes=u.notes;if(u.profitPerUnit!==undefined)dbu.profit_per_unit=u.profitPerUnit;
+    if(u.shifts!==undefined)dbu.shifts=JSON.stringify(u.shifts);if(u.shopOrder!==undefined)dbu.shop_order=u.shopOrder;
+    if(Object.keys(dbu).length)db.update("jobs",id,dbu);
+  },[]);
+  const del=useCallback(id=>{setOrders(p=>p.filter(o=>o.id!==id));setDelId(null);db.del("jobs",id);flash(t.deleted)},[t]);
+  const dup=useCallback(id=>{setOrders(p=>{const s=p.find(o=>o.id===id);if(!s)return p;const n={...s,id:`J${Date.now()}`,status:"pending"};
+    db.insert("jobs",[{machine:n.machine||n.assignedCaster,part:n.partName,die:n.die,balance:n.quantity,priority:n.priority,status:"pending",assigned_caster:n.assignedCaster,shifts:JSON.stringify(n.shifts),is_down:false,profit_per_unit:n.profitPerUnit,week_start:weekDates[0]||""}]);
+    return[...p,n]});flash(t.duplicated)},[t,weekDates]);
+  const togUrg=useCallback(id=>{const o=orders.find(x=>x.id===id);if(o)upd(id,{priority:o.priority==="urgent"?"normal":"urgent"})},[orders,upd]);
+  const updateShift=useCallback((jid,di,si,nv)=>{setOrders(p=>p.map(o=>{if(o.id!==jid)return o;const sh=o.shifts.map((s,d)=>d===di?(si===0?[nv,s[1]]:[s[0],nv]):[...s]);db.update("jobs",jid,{shifts:JSON.stringify(sh)});return{...o,shifts:sh,hasWork:sh.some(s=>s[0]>0||s[1]>0),totalShifts:sh.reduce((a,s)=>a+s[0]+s[1],0)}}));},[]);
+  const runSched=useCallback(()=>{setIsOpt(true);setTimeout(()=>{setOrders(p=>{let u=[...p];u.sort((a,b)=>({urgent:0,high:1,normal:2}[a.priority]||2)-({urgent:0,high:1,normal:2}[b.priority]||2));u.forEach(o=>{if(o.status==="pending"&&!o.isDown)o.status="casting"});return u});setIsOpt(false);flash(t.scheduled)},800)},[t]);
+
+  const empty={partName:"",die:"",quantity:0,profitPerUnit:0,machineType:"al400",priority:"normal",assignedCaster:"M4"};
+  const[nw,setNw]=useState(empty);
+  const addOrd=()=>{setOrders(p=>[...p,{id:`J${Date.now()}`,...nw,castQuantity:Math.ceil(nw.quantity*1.1),totalProfit:(nw.quantity*nw.profitPerUnit).toFixed(2),status:"pending",needsHaas:true,needsPaint:false,notes:"",shifts:[[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]],isDown:false,hasWork:false,batchGroup:nw.die,machine:nw.assignedCaster}]);setShowAdd(false);setNw(empty);flash(t.saved)};
 
   // ─── Computed ─────────────────────────────────────────
-  const stats=useMemo(()=>{
-    const castable=allOrders.filter(o=>o.isCastable&&o.needed>0);
-    const overdue=castable.filter(o=>o.shipDate&&new Date(o.shipDate)<new Date());
-    const thisWeek=castable.filter(o=>{const d=new Date(o.shipDate);const now=new Date();const wkEnd=new Date(now);wkEnd.setDate(wkEnd.getDate()+7);return d>=now&&d<=wkEnd});
-    return{
-      total:allOrders.length,
-      castable:castable.length,
-      totalPcs:castable.reduce((a,o)=>a+o.needed,0),
-      totalRev:castable.reduce((a,o)=>a+o.dollars,0),
-      overdue:overdue.length,
-      overduePcs:overdue.reduce((a,o)=>a+o.needed,0),
-      overdueRev:overdue.reduce((a,o)=>a+o.dollars,0),
-      thisWeek:thisWeek.length,
-      thisWeekPcs:thisWeek.reduce((a,o)=>a+o.needed,0),
-    };
-  },[allOrders]);
+  const urgents=useMemo(()=>orders.filter(o=>o.priority==="urgent"),[orders]);
+  const filtered=useMemo(()=>{if(!search)return orders;const s=search.toLowerCase();return orders.filter(o=>(o.partName||"").toLowerCase().includes(s)||(o.die||"").toLowerCase().includes(s)||(o.assignedCaster||"").toLowerCase().includes(s))},[orders,search]);
+  const stats=useMemo(()=>{const active=orders.filter(o=>!o.isDown);return{tot:active.length,tp:active.reduce((s,o)=>s+parseFloat(o.totalProfit||0),0)}},[orders]);
 
-  // ─── Styles ───────────────────────────────────────────
-  const cd=(x={})=>({background:P.sf,border:`1px solid ${P.bd}`,borderRadius:12,padding:16,...x});
-  const bt=(v="d")=>({padding:"6px 14px",borderRadius:8,border:v==="o"?`1px solid ${P.bd2}`:"none",background:v==="p"?P.ac:v==="x"?P.ur:v==="g"?P.gn:v==="o"?"transparent":P.sf2,color:v==="p"?"#000":v==="x"||v==="g"?"#fff":P.tx,fontWeight:700,fontSize:12,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:5});
-  const pill=a=>({padding:"6px 14px",borderRadius:8,background:a?P.ac:"transparent",color:a?"#000":P.tm,fontWeight:a?700:500,fontSize:11,border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:4,whiteSpace:"nowrap"});
+  // Planning intelligence
+  const planData=useMemo(()=>{
+    const machJobs={};MACH_LIST.forEach(m=>{machJobs[m]=orders.filter(o=>o.assignedCaster===m&&!o.isDown)});
+    // Die changes per machine
+    const dieChanges={};let totalDC=0,totalDT=0;
+    MACH_LIST.forEach(m=>{const jobs=machJobs[m].filter(j=>j.die&&j.hasWork);const dies=[...new Set(jobs.map(j=>j.die))];const ch=Math.max(0,dies.length-1);const dt=ch*(MI[m]?.dch||4);dieChanges[m]={dies,changes:ch,downtime:dt};totalDC+=ch;totalDT+=dt});
+    // At-risk parts: jobs where totalShifts > available shifts remaining
+    const atRisk=orders.filter(o=>!o.isDown&&o.quantity>0&&o.totalShifts>0).map(o=>{
+      const needed=Math.ceil(o.quantity/300);const have=o.totalShifts;return{...o,needed,have,risk:needed>have};
+    }).filter(o=>o.risk);
+    // Machine loading
+    const loading=MACH_LIST.map(m=>{const jobs=machJobs[m].filter(j=>j.hasWork);const totalShifts=jobs.reduce((a,j)=>a+j.totalShifts,0);const totalPcs=jobs.reduce((a,j)=>a+j.quantity,0);
+      const level=totalShifts>8?"heavily":totalShifts>3?"balanced":totalShifts>0?"light":"empty";return{machine:m,jobs:jobs.length,totalShifts,totalPcs,level,isDown:orders.some(o=>o.assignedCaster===m&&o.isDown)}});
+    // Downtime windows: days where machine has no scheduled work
+    const downtimeW=MACH_LIST.map(m=>{const jobs=machJobs[m].filter(j=>!j.isDown);const days=[];
+      for(let d=0;d<6;d++){const busy=jobs.some(j=>(j.shifts?.[d]?.[0]||0)>0||(j.shifts?.[d]?.[1]||0)>0);if(!busy)days.push(d)}
+      return{machine:m,freeDays:days}}).filter(m=>m.freeDays.length>0&&!orders.some(o=>o.assignedCaster===m.machine&&o.isDown));
+    // Daily revenue breakdown
+    const dailyRev=weekDates.map((_,di)=>{let rev=0;orders.filter(o=>!o.isDown&&o.hasWork).forEach(o=>{const s=o.shifts?.[di];if(s&&(s[0]>0||s[1]>0))rev+=o.profitPerUnit*300*(s[0]+s[1])/o.totalShifts});return rev});
+    return{dieChanges,totalDC,totalDT,atRisk,loading,downtimeW,dailyRev};
+  },[orders,weekDates]);
 
-  // ═════════════════════════════════════════════════════
-  // PAGES
-  // ═════════════════════════════════════════════════════
+  const priOpts=[{v:"normal",l:t.normal},{v:"high",l:t.high},{v:"urgent",l:`🔴 ${t.urgent}`}];
+  const statusOpts=["pending","casting","vibratory","machining","lab","painting","complete"].map(v=>({v,l:t[v]||v}));
+  const machOpts=[{v:"",l:"—"},...MACH_LIST.map(m=>({v:m,l:m}))];
+  const shiftOpts=[{v:1,l:t.shift1},{v:2,l:t.shift2}];
+  const roleOpts=[{v:"operator",l:t.operator},{v:"supervisor",l:t.supervisor},{v:"lead",l:t.lead}];
+  const langOpts=[{v:"en",l:"English"},{v:"es",l:"Español"}];
 
-  // ─── HOME (Upload) ────────────────────────────────────
-  const renderHome=()=><div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"70vh",gap:20}}>
-    <div style={{fontSize:48}}>🏭</div>
-    <div style={{fontSize:24,fontWeight:900,color:P.ac,textAlign:"center"}}>CastFlow AI Planner</div>
-    <div style={{fontSize:13,color:P.tm,textAlign:"center",maxWidth:400}}>Upload your Shipping Schedule Excel file. AI will analyze all orders and generate optimized weekly casting schedules.</div>
-    <div onClick={()=>fileRef.current?.click()} style={{padding:"16px 32px",borderRadius:12,background:P.ac,color:"#000",fontWeight:800,fontSize:16,cursor:"pointer",boxShadow:`0 4px 20px ${P.ac}40`}}>
-      📂 Upload Shipping Schedule
-    </div>
-    <div style={{fontSize:10,color:P.td}}>Supports NIDC Shipping Schedule format (.xlsx)</div>
+  // Edit modal
+  const eo=orders.find(o=>o.id===editId);
+
+  // ═══ PAGES ═══════════════════════════════════════════
+
+  // ─── Upload prompt (no data) ──────────────────────────
+  const UploadPrompt=()=><div style={{...cd(),textAlign:"center",padding:50}}>
+    <div style={{fontSize:44}}>📊</div>
+    <div style={{fontSize:14,fontWeight:700,color:C.tm,marginTop:10}}>{t.noData}</div>
+    <div onClick={()=>fileRef.current?.click()} style={{marginTop:16,padding:"14px 28px",borderRadius:10,background:C.ac,color:"#000",fontWeight:700,fontSize:14,cursor:"pointer",display:"inline-block"}}>{isLoading?`⏳ ${t.loading}`:`📂 ${t.upload}`}</div>
   </div>;
 
-  // ─── DASHBOARD ────────────────────────────────────────
-  const renderDash=()=><div style={{display:"flex",flexDirection:"column",gap:14}}>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-      <div><div style={{fontSize:18,fontWeight:900,color:P.tx}}>📊 Order Pipeline</div><div style={{fontSize:10,color:P.tm}}>📁 {fileName} · {allOrders.length} orders loaded</div></div>
-      <div style={{display:"flex",gap:6}}>
-        <button onClick={()=>generateAiSchedule(selectedWeek)} disabled={aiLoading} style={bt("p")}>{aiLoading?"⏳ AI Planning...":"🤖 Generate Weekly Plan"}</button>
+  // ─── Dashboard ────────────────────────────────────────
+  const renderDash=()=>!orders.length?<UploadPrompt/>:
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      {weekLabel&&<div style={{fontSize:11,color:C.ac,fontWeight:600}}>{t.weekOf} {weekLabel} • 📁 {fileName}</div>}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        {[{l:t.total,v:stats.tot,c:C.bl},{l:t.profit,v:`$${(stats.tp/1e3).toFixed(0)}K`,c:C.ac},{l:t.dieChanges,v:`${planData.totalDC} (${planData.totalDT}h)`,c:C.or},{l:t.scrap,v:"10%",c:C.ur}].map((s,i)=>
+          <div key={i} style={{...cd(),borderLeft:`3px solid ${s.c}`,flex:1,minWidth:130}}><div style={{fontSize:7,color:C.tm,fontWeight:600,textTransform:"uppercase"}}>{s.l}</div><div style={{fontSize:22,fontWeight:900,color:C.tx,marginTop:2}}>{s.v}</div></div>)}
       </div>
-    </div>
-
-    {/* KPIs */}
-    <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-      {[
-        {l:"Orders to Cast",v:stats.castable,c:P.bl},
-        {l:"Pieces Needed",v:stats.totalPcs.toLocaleString(),c:P.ac},
-        {l:"Revenue Pipeline",v:`$${(stats.totalRev/1e3).toFixed(0)}K`,c:P.gn},
-        {l:"OVERDUE",v:`${stats.overdue} orders`,c:P.ur,sub:`${stats.overduePcs.toLocaleString()} pcs · $${(stats.overdueRev/1e3).toFixed(0)}K`},
-      ].map((s,i)=><div key={i} style={{...cd(),borderLeft:`4px solid ${s.c}`,flex:1,minWidth:150}}>
-        <div style={{fontSize:8,color:P.tm,fontWeight:600,textTransform:"uppercase"}}>{s.l}</div>
-        <div style={{fontSize:26,fontWeight:900,color:P.tx,marginTop:3}}>{s.v}</div>
-        {s.sub&&<div style={{fontSize:9,color:s.c}}>{s.sub}</div>}
-      </div>)}
-    </div>
-
-    {/* Week Selector + Generate */}
-    <div style={{...cd(),border:`2px solid ${P.ac}30`}}>
-      <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-        <div style={{fontSize:13,fontWeight:800,color:P.ac}}>🤖 AI Schedule Generator</div>
-        <div style={{display:"flex",alignItems:"center",gap:6}}>
-          <span style={{fontSize:11,color:P.tm}}>Week starting:</span>
-          <input type="date" value={selectedWeek} onChange={e=>setSelectedWeek(e.target.value)} style={{background:P.sf3,color:P.tx,border:`1px solid ${P.bd}`,borderRadius:6,padding:"4px 8px",fontSize:12}}/>
-        </div>
-        <button onClick={()=>generateAiSchedule(selectedWeek)} disabled={aiLoading} style={bt("p")}>
-          {aiLoading?"⏳ Generating...":"🤖 Generate Plan for This Week"}
-        </button>
-      </div>
-      <div style={{fontSize:9,color:P.td,marginTop:6}}>AI will optimize machine assignments, minimize die changes, prioritize urgent orders, and limit Friday production.</div>
-    </div>
-
-    {/* Machine Capacity Overview */}
-    <div style={cd()}>
-      <div style={{fontSize:13,fontWeight:800,color:P.tx,marginBottom:10}}>Machine Fleet</div>
-      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-        {MACH.map(m=>{const info=MI[m];const orderCount=allOrders.filter(o=>o.machines.includes(m)&&o.needed>0).length;
-          return<div key={m} style={{background:P.sf2,borderRadius:8,padding:"8px 10px",minWidth:65,textAlign:"center",border:`1px solid ${info.down?P.ur:orderCount>0?P.gn:P.bd}25`,position:"relative",overflow:"hidden"}}>
-            <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:info.down?P.ur:orderCount>0?P.gn:P.td}}/>
-            <div style={{fontSize:14,fontWeight:900,color:info.down?P.ur:P.tx}}>{m}</div>
-            <div style={{fontSize:8,color:P.tm}}>{info.type}</div>
-            <div style={{fontSize:10,fontWeight:700,color:info.down?P.ur:P.gn,marginTop:2}}>{info.down?"DOWN":`${info.avg}/sh`}</div>
-          </div>})}
-      </div>
-    </div>
-
-    {/* Top Urgent Orders */}
-    <div style={{...cd(),border:stats.overdue>0?`1px solid ${P.ur}30`:`1px solid ${P.bd}`}}>
-      <div style={{fontSize:13,fontWeight:800,color:stats.overdue>0?P.ur:P.tx,marginBottom:8}}>
-        {stats.overdue>0?`🔴 ${stats.overdue} Overdue Orders`:"📋 Upcoming Orders"}
-      </div>
-      <div style={{overflow:"auto",maxHeight:300}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
-          <thead><tr>{["Product","Customer","Die","DCM","Need","Ship Date","Revenue"].map((h,i)=>
-            <th key={i} style={{padding:"5px 6px",textAlign:"left",fontSize:8,fontWeight:700,color:P.tm,borderBottom:`2px solid ${P.bd}`,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
-          <tbody>{allOrders.filter(o=>o.isCastable&&o.needed>0).sort((a,b)=>(a.shipDate||"9").localeCompare(b.shipDate||"9")).slice(0,25).map((o,i)=>{
-            const isOverdue=o.shipDate&&new Date(o.shipDate)<new Date();
-            return<tr key={i} style={{background:isOverdue?`${P.ur}06`:"transparent"}}>
-              <td style={{padding:"4px 6px",fontWeight:600,borderBottom:`1px solid ${P.bd}`,color:isOverdue?P.ur:P.tx}}>{o.product}</td>
-              <td style={{padding:"4px 6px",fontSize:9,borderBottom:`1px solid ${P.bd}`,color:P.tm}}>{o.customer?.split(" ").slice(0,2).join(" ")}</td>
-              <td style={{padding:"4px 6px",color:P.ac,borderBottom:`1px solid ${P.bd}`}}>{o.die||"—"}</td>
-              <td style={{padding:"4px 6px",borderBottom:`1px solid ${P.bd}`}}>{o.dcm}</td>
-              <td style={{padding:"4px 6px",fontWeight:700,borderBottom:`1px solid ${P.bd}`}}>{o.needed.toLocaleString()}</td>
-              <td style={{padding:"4px 6px",color:isOverdue?P.ur:P.tx,borderBottom:`1px solid ${P.bd}`,fontWeight:isOverdue?700:400}}>{o.shipDate||"—"}</td>
-              <td style={{padding:"4px 6px",color:P.gn,fontWeight:600,borderBottom:`1px solid ${P.bd}`}}>${o.dollars.toLocaleString()}</td>
-            </tr>})}</tbody>
-        </table>
-      </div>
-    </div>
-  </div>;
-
-  // ─── GANTT CHART ──────────────────────────────────────
-  const renderGantt=()=>{
-    if(!weekPlan)return<div style={{...cd(),textAlign:"center",padding:40}}><div style={{fontSize:36}}>🏭</div><div style={{color:P.tm,marginTop:8}}>Generate a plan first from the Dashboard</div><button onClick={()=>setPage("dashboard")} style={{...bt("p"),marginTop:12}}>Go to Dashboard</button></div>;
-
-    // Group schedule by machine
-    const machineSchedule={};
-    MACH.forEach(m=>{machineSchedule[m]={Mon:{1:null,2:null},Tue:{1:null,2:null},Wed:{1:null,2:null},Thu:{1:null,2:null},Fri:{1:null}}});
-    
-    (weekPlan.schedule||[]).forEach(s=>{
-      if(machineSchedule[s.machine]?.[s.day]){
-        machineSchedule[s.machine][s.day][s.shift]={product:s.product,die:s.die,qty:s.qty};
-      }
-    });
-
-    // Die changes
-    const dieChanges={};
-    (weekPlan.die_changes||[]).forEach(dc=>{
-      if(!dieChanges[dc.machine])dieChanges[dc.machine]=[];
-      dieChanges[dc.machine].push(dc);
-    });
-
-    const isFriday=d=>d==="Fri";
-    const fridayMachines=weekPlan.friday_machines||[];
-
-    return<div style={{display:"flex",flexDirection:"column",gap:14}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-        <div>
-          <div style={{fontSize:18,fontWeight:900,color:P.tx}}>🏭 Weekly Casting Schedule</div>
-          <div style={{fontSize:10,color:P.ac}}>Week of {selectedWeek} · AI Generated</div>
-        </div>
-        <div style={{display:"flex",gap:6}}>
-          <button onClick={()=>generateAiSchedule(selectedWeek)} disabled={aiLoading} style={bt("o")}>{aiLoading?"⏳":"🔄 Regenerate"}</button>
-          <button onClick={()=>setPage("dashboard")} style={bt("o")}>← Dashboard</button>
-        </div>
-      </div>
-
-      {/* Summary */}
-      {weekPlan.summary&&<div style={{...cd(),border:`2px solid ${P.ac}20`,background:`${P.ac}05`}}>
-        <div style={{fontSize:11,color:P.tx,lineHeight:1.5}}>{weekPlan.summary}</div>
+      {urgents.length>0&&<div style={{...cd(),background:`${C.ur}06`,border:`1px solid ${C.ur}30`}}>
+        <div style={{fontSize:12,fontWeight:800,color:C.ur,marginBottom:4}}>🔥 {urgents.length} Urgent</div>
+        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{urgents.map(o=><div key={o.id} onClick={()=>setEditId(o.id)} style={{background:`${C.ur}15`,border:`1px solid ${C.ur}`,borderRadius:5,padding:"4px 8px",cursor:"pointer",fontSize:10,color:C.ur,fontWeight:700}}>🔴 {o.partName} ({o.assignedCaster})</div>)}</div>
       </div>}
+      {planData.atRisk.length>0&&<div style={{...cd(),background:`${C.or}06`,border:`1px solid ${C.or}30`}}>
+        <div style={{fontSize:12,fontWeight:800,color:C.or,marginBottom:4}}>⚠️ {t.atRiskParts} ({planData.atRisk.length})</div>
+        {planData.atRisk.slice(0,5).map(o=><div key={o.id} style={{fontSize:10,color:C.or,padding:"2px 0"}}>{o.partName} ({o.assignedCaster}) — {o.needed} {t.shiftsNeeded}, {t.onlyHave} {o.have}</div>)}
+      </div>}
+      <div style={cd()}>
+        <div style={{fontSize:11,fontWeight:700,color:C.tx,marginBottom:8}}>{t.machineLoading}</div>
+        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{planData.loading.map(m=>{const sc=m.isDown?C.ur:m.level==="heavily"?C.gn:m.level==="balanced"?C.ac:m.level==="light"?C.bl:C.td;
+          return<div key={m.machine} style={{background:C.sf2,borderRadius:5,padding:"4px 6px",minWidth:48,textAlign:"center",border:`1px solid ${sc}25`,cursor:"pointer"}} onClick={()=>setPage("castGantt")}>
+            <div style={{fontSize:8,fontWeight:800,color:m.isDown?C.ur:C.tx}}>{m.machine}</div>
+            <div style={{fontSize:13,fontWeight:900,color:sc}}>{m.isDown?"✕":m.jobs}</div>
+            <div style={{fontSize:6,color:sc,fontWeight:600}}>{m.isDown?"DOWN":t[m.level]}</div>
+          </div>})}</div>
+      </div>
+      <div style={cd()}>
+        <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",justifyContent:"center"}}>{["casting","vibratory","machining","lab","painting","complete"].map((s,i)=>{const c=SC[s];return<div key={s} style={{display:"flex",alignItems:"center"}}><div style={{textAlign:"center",padding:"5px 10px",background:`${c}10`,border:`1px solid ${c}20`,borderRadius:6,minWidth:55}}><div style={{fontSize:8,fontWeight:700,color:c}}>{t[s]}</div><div style={{fontSize:14,fontWeight:900,color:C.tx}}>{orders.filter(o=>o.status===s).length}</div></div>{i<5&&<div style={{width:14,height:1.5,background:C.bd2}}/>}</div>})}</div>
+      </div>
+    </div>;
 
-      {/* GANTT GRID */}
-      <div style={{...cd({padding:0}),overflow:"auto",borderRadius:14,boxShadow:"0 4px 24px rgba(0,0,0,.3)"}}>
-        {/* Header */}
-        <div style={{display:"flex",position:"sticky",top:0,zIndex:5,background:"#080B10",borderBottom:`2px solid ${P.ac}25`}}>
-          <div style={{width:70,minWidth:70,padding:"10px 6px",textAlign:"center",borderRight:`2px solid ${P.bd}`}}>
-            <div style={{fontSize:9,fontWeight:800,color:P.ac}}>MACHINE</div>
+  // ─── Planning Intelligence ────────────────────────────
+  const renderPlanning=()=>!orders.length?<UploadPrompt/>:
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <div style={{fontSize:16,fontWeight:900,color:C.ac}}>📋 {t.planTitle}</div>
+      {weekLabel&&<div style={{fontSize:10,color:C.tm}}>{t.weekOf} {weekLabel}</div>}
+
+      {/* Die Change Schedule */}
+      <div style={cd()}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <div style={{fontSize:12,fontWeight:800,color:C.tx}}>🔄 {t.dieChangeSchedule}</div>
+          <div style={{display:"flex",gap:8}}>
+            <span style={{fontSize:10,color:C.or,fontWeight:700}}>{planData.totalDC} {t.changes}</span>
+            <span style={{fontSize:10,color:C.ur,fontWeight:700}}>⏱ {planData.totalDT} {t.hrs}</span>
           </div>
-          {DAYS.map((d,di)=><div key={d} style={{flex:1,minWidth:isFriday(d)?90:160,borderRight:di<4?`1px solid ${P.bd}`:"none",textAlign:"center",padding:"6px 0",background:isFriday(d)?`${P.or}08`:"transparent"}}>
-            <div style={{fontSize:12,fontWeight:800,color:isFriday(d)?P.or:P.tx}}>{d}</div>
-            {isFriday(d)?<div style={{fontSize:7,color:P.or}}>LIMITED</div>:
-            <div style={{display:"flex",justifyContent:"center",gap:0,marginTop:3}}>
-              <div style={{flex:1,fontSize:8,color:P.td,borderRight:`1px solid ${P.bd}20`}}>1st Shift</div>
-              <div style={{flex:1,fontSize:8,color:P.td}}>2nd Shift</div>
-            </div>}
-          </div>)}
         </div>
-
-        {/* Machine Rows */}
-        {MACH.map((m,mi)=>{
-          const info=MI[m];
-          const mDieChanges=dieChanges[m]||[];
-          const isOnFriday=fridayMachines.includes(m);
-          
-          return<div key={m} style={{display:"flex",borderBottom:`2px solid ${P.bd}`,minHeight:52}}>
-            {/* Machine Label */}
-            <div style={{width:70,minWidth:70,borderRight:`2px solid ${P.bd}`,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",position:"relative",background:info.down?`${P.ur}06`:P.sf2}}>
-              <div style={{position:"absolute",left:0,top:0,bottom:0,width:4,background:info.down?P.ur:P.gn}}/>
-              <div style={{fontSize:16,fontWeight:900,color:info.down?P.ur:P.tx}}>{m}</div>
-              <div style={{fontSize:7,color:info.down?P.ur:P.tm}}>{info.down?"DOWN":info.type}</div>
-            </div>
-
-            {/* Day Cells */}
-            {DAYS.map((d,di)=>{
-              const shifts=isFriday(d)?[1]:[1,2];
-              const isLimitedFri=isFriday(d)&&!isOnFriday&&!info.down;
-              
-              if(info.down){
-                return<div key={d} style={{flex:1,minWidth:isFriday(d)?90:160,borderRight:di<4?`1px solid ${P.bd}`:"none",display:"flex",alignItems:"center",justifyContent:"center",background:`${P.ur}04`}}>
-                  <div style={{width:"90%",height:30,borderRadius:6,background:`repeating-linear-gradient(45deg,${P.ur}10,${P.ur}10 6px,transparent 6px,transparent 12px)`,border:`1px dashed ${P.ur}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:8,color:P.ur}}>DOWN</div>
-                </div>;
-              }
-              
-              if(isLimitedFri){
-                return<div key={d} style={{flex:1,minWidth:90,borderRight:di<4?`1px solid ${P.bd}`:"none",display:"flex",alignItems:"center",justifyContent:"center",background:`${P.or}04`}}>
-                  <div style={{fontSize:8,color:P.td,fontStyle:"italic"}}>Off</div>
-                </div>;
-              }
-
-              return<div key={d} style={{flex:1,minWidth:isFriday(d)?90:160,borderRight:di<4?`1px solid ${P.bd}`:"none",display:"flex",background:isFriday(d)?`${P.or}04`:"transparent"}}>
-                {shifts.map(sh=>{
-                  const slot=machineSchedule[m]?.[d]?.[sh];
-                  if(!slot)return<div key={sh} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",borderRight:sh===1&&!isFriday(d)?`1px solid ${P.bd}15`:"none"}}>
-                    <span style={{fontSize:8,color:`${P.td}40`}}>—</span>
-                  </div>;
-                  
-                  const jc=JC[(mi*3+DAYS.indexOf(d)+sh)%JC.length];
-                  return<div key={sh} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:"4px 3px",borderRight:sh===1&&!isFriday(d)?`1px solid ${P.bd}15`:"none"}}>
-                    <div style={{width:"95%",padding:"5px 6px",borderRadius:7,background:`linear-gradient(135deg,${jc}DD,${jc}99)`,border:`1px solid ${jc}`,position:"relative",overflow:"hidden",boxShadow:`0 2px 8px ${jc}30`}}>
-                      <div style={{position:"absolute",top:0,left:0,right:0,height:"40%",background:"linear-gradient(180deg,rgba(255,255,255,.12),transparent)",borderRadius:"7px 7px 0 0"}}/>
-                      <div style={{fontSize:10,fontWeight:800,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{slot.product}</div>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:2}}>
-                        {slot.die&&<span style={{fontSize:7,color:"rgba(255,255,255,.7)"}}>🔧{slot.die}</span>}
-                        <span style={{fontSize:8,fontWeight:700,color:"rgba(255,255,255,.9)"}}>{slot.qty}</span>
-                      </div>
-                    </div>
-                  </div>;
-                })}
-              </div>;
-            })}
-          </div>;
-        })}
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {MACH_LIST.filter(m=>planData.dieChanges[m]?.changes>0).map(m=>{const dc=planData.dieChanges[m];
+            return<div key={m} style={{background:C.sf2,borderRadius:6,padding:"8px 10px",minWidth:140,border:`1px solid ${dc.changes>1?C.or:C.ac}25`}}>
+              <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:13,fontWeight:900,color:C.tx}}>{m}</span>
+                <span style={{fontSize:8,fontWeight:700,color:C.or,padding:"1px 5px",borderRadius:3,background:`${C.or}15`}}>🔄 {dc.changes}</span></div>
+              <div style={{display:"flex",alignItems:"center",gap:3,marginTop:4,flexWrap:"wrap"}}>{dc.dies.map((d,i)=><span key={i} style={{display:"flex",alignItems:"center",gap:3}}>
+                <span style={{padding:"1px 5px",borderRadius:3,fontSize:9,fontWeight:700,background:`${JC[i%JC.length]}18`,color:JC[i%JC.length]}}>{d}</span>
+                {i<dc.dies.length-1&&<span style={{color:C.ac,fontSize:10}}>→</span>}</span>)}</div>
+              <div style={{fontSize:8,color:C.or,marginTop:3}}>⏱ {dc.downtime} {t.hrs}</div>
+            </div>})}
+          {planData.totalDC===0&&<div style={{fontSize:10,color:C.gn}}>✓ {t.noChanges}</div>}
+        </div>
       </div>
 
-      {/* Die Changes */}
-      {weekPlan.die_changes?.length>0&&<div style={cd()}>
-        <div style={{fontSize:13,fontWeight:800,color:P.or,marginBottom:8}}>🔄 Die Changes ({weekPlan.die_changes.length})</div>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          {weekPlan.die_changes.map((dc,i)=><div key={i} style={{background:P.sf2,borderRadius:8,padding:"8px 12px",border:`1px solid ${P.or}20`}}>
-            <div style={{fontSize:13,fontWeight:800,color:P.tx}}>{dc.machine}</div>
-            <div style={{display:"flex",alignItems:"center",gap:4,marginTop:3}}>
-              <span style={{padding:"2px 6px",borderRadius:4,background:`${P.bl}20`,color:P.bl,fontSize:9,fontWeight:700}}>{dc.from}</span>
-              <span style={{color:P.ac}}>→</span>
-              <span style={{padding:"2px 6px",borderRadius:4,background:`${P.gn}20`,color:P.gn,fontSize:9,fontWeight:700}}>{dc.to}</span>
-            </div>
-            <div style={{fontSize:8,color:P.tm,marginTop:2}}>{dc.day} · ⏱ {dc.hours}h</div>
+      {/* At-Risk Parts */}
+      {planData.atRisk.length>0&&<div style={{...cd(),border:`1px solid ${C.or}30`}}>
+        <div style={{fontSize:12,fontWeight:800,color:C.or,marginBottom:6}}>⚠️ {t.atRiskParts}</div>
+        <div style={{overflow:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr>{[t.partName,t.die,t.caster,t.qty,t.shiftsNeeded,t.onlyHave,t.risk].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
+          <tbody>{planData.atRisk.map(o=><tr key={o.id} onClick={()=>setEditId(o.id)} style={{cursor:"pointer"}}>
+            <td style={{...tdS,fontWeight:600}}>{o.partName}</td>
+            <td style={{...tdS,color:C.ac,fontSize:9}}>{o.die}</td>
+            <td style={{...tdS,fontSize:9}}>{o.assignedCaster}</td>
+            <td style={tdS}>{o.quantity?.toLocaleString()}</td>
+            <td style={{...tdS,fontWeight:700,color:C.ur}}>{o.needed}</td>
+            <td style={{...tdS,color:C.or}}>{o.have}</td>
+            <td style={tdS}><span style={{fontSize:8,fontWeight:700,color:C.ur,padding:"1px 5px",borderRadius:3,background:`${C.ur}15`}}>⚠️ {t.risk}</span></td>
+          </tr>)}</tbody>
+        </table></div>
+      </div>}
+
+      {/* Downtime Windows */}
+      {planData.downtimeW.length>0&&<div style={cd()}>
+        <div style={{fontSize:12,fontWeight:800,color:C.tx,marginBottom:6}}>🕐 {t.downtimeWindows}</div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {planData.downtimeW.map(m=><div key={m.machine} style={{background:C.sf2,borderRadius:5,padding:"6px 8px",minWidth:100}}>
+            <div style={{fontSize:12,fontWeight:800,color:C.tx}}>{m.machine}</div>
+            <div style={{display:"flex",gap:2,marginTop:3}}>{m.freeDays.map(d=><span key={d} style={{fontSize:8,padding:"1px 4px",borderRadius:3,background:`${C.gn}15`,color:C.gn,fontWeight:600}}>{weekDates[d]?.split(" ")[0]||`Day${d+1}`}</span>)}</div>
           </div>)}
         </div>
       </div>}
 
-      {/* Revenue Projection */}
-      {weekPlan.daily_revenue&&<div style={cd()}>
-        <div style={{fontSize:13,fontWeight:800,color:P.tx,marginBottom:8}}>💰 Daily Revenue Projection</div>
-        <div style={{display:"flex",gap:6}}>
-          {DAYS.map(d=>{const rev=weekPlan.daily_revenue[d]||0;const pct=Math.min((rev/45e3)*100,120);
-            return<div key={d} style={{flex:1,textAlign:"center"}}>
-              <div style={{height:80,display:"flex",flexDirection:"column",justifyContent:"flex-end",position:"relative"}}>
-                <div style={{position:"absolute",bottom:`${(45e3/55e3)*100}%`,left:0,right:0,height:1,background:P.ur,opacity:.3}}/>
-                <div style={{background:rev>=45e3?P.gn:rev>30e3?P.ac:P.or,borderRadius:"5px 5px 0 0",height:`${Math.max((rev/55e3)*100,5)}%`,transition:"height .3s"}}/>
+      {/* Daily Revenue */}
+      <div style={cd()}>
+        <div style={{fontSize:12,fontWeight:800,color:C.tx,marginBottom:6}}>{t.dailyBreakdown}</div>
+        <div style={{display:"flex",gap:4}}>
+          {planData.dailyRev.map((rev,i)=>{const pct=Math.min((rev/45e3)*100,100);
+            return<div key={i} style={{flex:1,textAlign:"center"}}>
+              <div style={{height:80,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
+                <div style={{background:rev>=45e3?C.gn:rev>30e3?C.ac:rev>15e3?C.or:C.td,borderRadius:"4px 4px 0 0",height:`${Math.max(pct,5)}%`,transition:"height .3s"}}/>
               </div>
-              <div style={{fontSize:10,fontWeight:800,color:rev>=45e3?P.gn:P.tx,marginTop:3}}>${(rev/1e3).toFixed(0)}K</div>
-              <div style={{fontSize:9,color:d==="Fri"?P.or:P.tm,fontWeight:d==="Fri"?700:400}}>{d}</div>
+              <div style={{fontSize:8,fontWeight:700,color:rev>=45e3?C.gn:C.tx,marginTop:2}}>${(rev/1e3).toFixed(0)}K</div>
+              <div style={{fontSize:7,color:C.tm}}>{weekDates[i]?.split(" ")[0]}</div>
             </div>})}
         </div>
-        <div style={{fontSize:7,color:P.ur,textAlign:"right",marginTop:2}}>— $45K target</div>
-      </div>}
+        <div style={{height:1,background:C.ur,marginTop:2,opacity:.3}}/>
+        <div style={{fontSize:7,color:C.ur,textAlign:"right"}}>$45K {lang==="en"?"target line":"línea meta"}</div>
+      </div>
+    </div>;
 
-      {/* Warnings & Recommendations */}
-      <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-        {weekPlan.warnings?.length>0&&<div style={{...cd(),flex:1,minWidth:250,border:`1px solid ${P.ur}20`}}>
-          <div style={{fontSize:12,fontWeight:800,color:P.ur,marginBottom:4}}>⚠️ Warnings</div>
-          {weekPlan.warnings.map((w,i)=><div key={i} style={{fontSize:10,color:P.or,padding:"3px 0"}}>• {w}</div>)}
-        </div>}
-        {weekPlan.recommendations?.length>0&&<div style={{...cd(),flex:1,minWidth:250,border:`1px solid ${P.gn}20`}}>
-          <div style={{fontSize:12,fontWeight:800,color:P.gn,marginBottom:4}}>💡 Recommendations</div>
-          {weekPlan.recommendations.map((r,i)=><div key={i} style={{fontSize:10,color:P.tx,padding:"3px 0"}}>• {r}</div>)}
-        </div>}
+  // ─── Machine Gantt ────────────────────────────────────
+  const renderCastGantt=()=>{
+    if(!orders.length)return<UploadPrompt/>;
+    const mg=MACH_LIST.map(m=>({machine:m,jobs:orders.filter(o=>o.assignedCaster===m)}));
+    return<div style={{display:"flex",flexDirection:"column",gap:10}}>
+      <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
+        <div><div style={{fontSize:14,fontWeight:900,color:C.tx}}>🏭 {lang==="en"?"Machine Schedule":"Programa Máquinas"}</div>{weekLabel&&<div style={{fontSize:8,color:C.td}}>{t.weekOf} {weekLabel}</div>}</div>
+        <button onClick={runSched} style={bt("p")} disabled={isOpt}>{isOpt?"⏳":`⚡ ${t.run}`}</button>
+      </div>
+      <div style={{background:C.sf,border:`1px solid ${C.bd}`,borderRadius:10,overflow:"auto"}}>
+        <div style={{display:"flex",position:"sticky",top:0,zIndex:4,background:"#090C11",borderBottom:`2px solid ${C.ac}20`}}>
+          <div style={{width:50,minWidth:50,padding:"6px 2px",textAlign:"center",borderRight:`2px solid ${C.bd}`}}><div style={{fontSize:7,fontWeight:800,color:C.ac}}>MCH</div></div>
+          <div style={{width:130,minWidth:130,padding:"6px 4px",borderRight:`2px solid ${C.bd}`}}><div style={{fontSize:7,fontWeight:800,color:C.ac}}>{t.partName}/{t.die}</div></div>
+          <div style={{width:42,minWidth:42,textAlign:"center",borderRight:`1px solid ${C.bd}`,padding:"6px 1px"}}><div style={{fontSize:6,fontWeight:700,color:C.tm}}>BAL</div></div>
+          {weekDates.map((d,i)=><div key={i} style={{flex:1,minWidth:70,borderRight:i<5?`1px solid ${C.bd}`:"none",textAlign:"center",padding:"2px 0"}}>
+            <div style={{fontSize:7,fontWeight:800,color:i<=1?C.ac:C.tm}}>{d}</div>
+            <div style={{display:"flex",marginTop:1}}><div style={{flex:1,fontSize:6,color:C.td}}>{t.first}</div><div style={{flex:1,fontSize:6,color:C.td}}>{t.second}</div></div>
+          </div>)}
+        </div>
+        {mg.map((g,mi)=>{
+          const isDown=g.jobs.some(j=>j.isDown);const active=g.jobs.filter(j=>!j.isDown&&(j.hasWork||j.quantity>0));
+          const worker1=workers.find(w=>w.machine===g.machine&&w.shift===1);
+          const worker2=workers.find(w=>w.machine===g.machine&&w.shift===2);
+          if(isDown&&!active.length)return<div key={g.machine} style={{display:"flex",height:34,borderBottom:`2px solid ${C.bd}`,background:`${C.ur}04`}}>
+            <div style={{width:50,minWidth:50,borderRight:`2px solid ${C.bd}`,display:"flex",alignItems:"center",justifyContent:"center",background:`${C.ur}08`}}><span style={{fontSize:13,fontWeight:900,color:C.ur}}>{g.machine}</span></div>
+            <div style={{flex:1,display:"flex",alignItems:"center",padding:"0 6px",fontSize:9,color:C.ur,fontWeight:700}}>⛔ {t.machDown}</div>
+          </div>;
+          if(!active.length)return<div key={g.machine} style={{display:"flex",height:30,borderBottom:`1px solid ${C.bd}`}}>
+            <div style={{width:50,minWidth:50,borderRight:`2px solid ${C.bd}`,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:12,fontWeight:900,color:C.td}}>{g.machine}</span></div>
+            <div style={{flex:1,display:"flex",alignItems:"center",padding:"0 6px",fontSize:8,color:C.td,fontStyle:"italic"}}>{t.noJobs}</div>
+          </div>;
+          return<div key={g.machine} style={{borderBottom:`2px solid ${C.bd}`}}>
+            {active.map((j,ji)=>{const jc=JC[(mi*3+ji)%JC.length];const prev=ji>0?active[ji-1].die:null;const dch=prev&&j.die&&prev!==j.die;
+              return<div key={j.id}>
+                {dch&&<div style={{display:"flex",height:12,background:`${C.ac}04`}}><div style={{width:50,minWidth:50,borderRight:`2px solid ${C.bd}`,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:6,color:C.ac}}>🔄</span></div><div style={{flex:1,display:"flex",alignItems:"center"}}><div style={{height:1,flex:1,background:`${C.ac}15`}}/><span style={{fontSize:5,color:C.ac,fontWeight:700,padding:"0 3px"}}>{prev}→{j.die}</span><div style={{height:1,flex:1,background:`${C.ac}15`}}/></div></div>}
+                <div style={{display:"flex",minHeight:36,background:ji%2===0?"transparent":`${C.sf2}20`,cursor:"pointer"}} onClick={()=>setEditId(j.id)}>
+                  {ji===0?<div style={{width:50,minWidth:50,borderRight:`2px solid ${C.bd}`,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",position:"relative"}}>
+                    <div style={{position:"absolute",left:0,top:0,bottom:0,width:3,background:C.gn}}/>
+                    <div style={{fontSize:14,fontWeight:900,color:C.tx}}>{g.machine}</div>
+                    <div style={{fontSize:6,color:C.gn}}>{active.length} {t.jobs}</div>
+                    {(worker1?.name||worker2?.name)&&<div style={{fontSize:5,color:C.tm,marginTop:1}}>{worker1?.name||"?"}/{worker2?.name||"?"}</div>}
+                  </div>:<div style={{width:50,minWidth:50,borderRight:`2px solid ${C.bd}`,position:"relative"}}><div style={{position:"absolute",left:23,top:0,bottom:0,width:1,background:C.bd2}}/></div>}
+                  <div style={{width:130,minWidth:130,padding:"3px 4px",borderRight:`2px solid ${C.bd}`,display:"flex",flexDirection:"column",justifyContent:"center"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:3}}><div style={{width:3,height:18,borderRadius:2,background:jc}}/><div><div style={{fontSize:9,fontWeight:700,color:C.tx,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:108}}>{j.partName}</div>{j.die&&<div style={{fontSize:7,color:C.ac}}>🔧 {j.die}</div>}</div></div>
+                  </div>
+                  <div style={{width:42,minWidth:42,borderRight:`1px solid ${C.bd}`,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:9,fontWeight:800,color:j.quantity>3e3?C.or:C.tx}}>{j.quantity>999?`${(j.quantity/1e3).toFixed(1)}K`:j.quantity}</span></div>
+                  {(j.shifts||[]).map((sh,di)=><div key={di} style={{flex:1,minWidth:70,borderRight:di<5?`1px solid ${C.bd}`:"none",display:"flex",background:di<=1?`${C.ac}02`:"transparent",position:"relative"}}>
+                    {[0,1].map(si=><div key={si} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:"2px 1px",borderRight:si===0?`1px dotted ${C.bd}08`:"none"}}>
+                      <ShiftCell value={sh[si]} color={jc} onChange={nv=>updateShift(j.id,di,si,nv)}/>
+                    </div>)}
+                    {di<5&&(sh[0]>0||sh[1]>0)&&(j.shifts?.[di+1]||[0,0]).some(v=>v>0)&&<div style={{position:"absolute",right:-2,top:"50%",width:4,height:1,background:`${jc}35`,zIndex:2}}/>}
+                  </div>)}
+                </div>
+              </div>})}
+          </div>})}
       </div>
     </div>;
   };
 
-  // ─── AI CHAT ──────────────────────────────────────────
-  const renderChat=()=><div style={{display:"flex",flexDirection:"column",gap:10,height:"70vh"}}>
-    <div style={{fontSize:16,fontWeight:900,color:P.ac}}>🤖 AI Assistant</div>
-    <div style={{fontSize:10,color:P.tm}}>Ask about your production schedule, machine capacity, die changes, or anything else.</div>
-    
-    {/* Messages */}
-    <div style={{flex:1,overflow:"auto",...cd({padding:12})}}>
-      {aiChat.length===0&&<div style={{textAlign:"center",color:P.td,fontSize:11,padding:20}}>
-        Ask me anything about your production schedule...<br/>
-        Examples:<br/>
-        "What should I prioritize this week?"<br/>
-        "Which machines have capacity?"<br/>
-        "How many die changes do we need?"
-      </div>}
-      {aiChat.map((m,i)=><div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start",marginBottom:8}}>
-        <div style={{maxWidth:"80%",padding:"8px 12px",borderRadius:10,background:m.role==="user"?P.ac:`${P.bl}20`,color:m.role==="user"?"#000":P.tx,fontSize:11,lineHeight:1.5}}>
-          {m.role==="ai"&&<span style={{fontSize:9,color:P.bl,fontWeight:700}}>🤖 AI: </span>}
-          {m.text}
-        </div>
-      </div>)}
-      {aiLoading&&<div style={{fontSize:10,color:P.ac,padding:8}}>🤖 Thinking...</div>}
+  // ─── Orders ───────────────────────────────────────────
+  const renderOrders=()=><div style={{display:"flex",flexDirection:"column",gap:8}}>
+    <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
+      <input placeholder={t.search} value={search} onChange={e=>setSearch(e.target.value)} style={{...inp,maxWidth:200}}/>
+      <div style={{display:"flex",gap:3}}><button onClick={()=>setShowAdd(true)} style={bt("p")}>{t.add}</button><button onClick={runSched} style={bt("o")} disabled={isOpt}>{isOpt?"⏳":`⚡ ${t.run}`}</button></div>
     </div>
-
-    {/* Input */}
-    <div style={{display:"flex",gap:6}}>
-      <input value={userMsg} onChange={e=>setUserMsg(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")sendAiMessage()}}
-        placeholder="Ask about scheduling, capacity, priorities..."
-        style={{flex:1,padding:"10px 14px",borderRadius:8,border:`1px solid ${P.bd2}`,background:P.sf2,color:P.tx,fontSize:12,outline:"none"}}/>
-      <button onClick={sendAiMessage} disabled={aiLoading} style={bt("p")}>Send</button>
-    </div>
-  </div>;
-
-  // ─── ORDERS TABLE ─────────────────────────────────────
-  const[orderSearch,setOrderSearch]=useState("");
-  const filteredOrders=useMemo(()=>{
-    let o=allOrders.filter(o=>o.isCastable&&o.needed>0);
-    if(orderSearch){const s=orderSearch.toLowerCase();o=o.filter(x=>(x.product||"").toLowerCase().includes(s)||(x.die||"").toLowerCase().includes(s)||(x.customer||"").toLowerCase().includes(s))}
-    return o.sort((a,b)=>(a.shipDate||"9").localeCompare(b.shipDate||"9"));
-  },[allOrders,orderSearch]);
-
-  const renderOrders=()=><div style={{display:"flex",flexDirection:"column",gap:10}}>
-    <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:6}}>
-      <div style={{fontSize:16,fontWeight:900,color:P.tx}}>📦 All Orders ({filteredOrders.length})</div>
-      <input placeholder="Search product, die, customer..." value={orderSearch} onChange={e=>setOrderSearch(e.target.value)} style={{padding:"6px 10px",borderRadius:6,border:`1px solid ${P.bd2}`,background:P.sf2,color:P.tx,fontSize:11,outline:"none",width:250}}/>
-    </div>
-    <div style={{...cd({padding:0}),overflow:"auto",maxHeight:500}}>
-      <table style={{width:"100%",borderCollapse:"collapse",fontSize:10,minWidth:800}}>
-        <thead><tr>{["Product","Customer","Description","Die","DCM","Need","On Hand","Ship Date","Revenue"].map((h,i)=>
-          <th key={i} style={{padding:"6px",textAlign:"left",fontSize:8,fontWeight:700,color:P.tm,borderBottom:`2px solid ${P.bd}`,position:"sticky",top:0,background:P.sf,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
-        <tbody>{filteredOrders.map((o,i)=>{const od=o.shipDate&&new Date(o.shipDate)<new Date();
-          return<tr key={i} style={{background:od?`${P.ur}05`:"transparent"}}>
-            <td style={{padding:"5px 6px",fontWeight:700,borderBottom:`1px solid ${P.bd}`,color:od?P.ur:P.tx}}>{o.product}</td>
-            <td style={{padding:"5px 6px",fontSize:9,borderBottom:`1px solid ${P.bd}`,color:P.tm}}>{o.customer?.split(" ").slice(0,2).join(" ")}</td>
-            <td style={{padding:"5px 6px",fontSize:9,borderBottom:`1px solid ${P.bd}`,color:P.tm,maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{o.description}</td>
-            <td style={{padding:"5px 6px",color:P.ac,borderBottom:`1px solid ${P.bd}`}}>{o.die||"—"}</td>
-            <td style={{padding:"5px 6px",borderBottom:`1px solid ${P.bd}`}}>{o.dcm}</td>
-            <td style={{padding:"5px 6px",fontWeight:700,borderBottom:`1px solid ${P.bd}`}}>{o.needed.toLocaleString()}</td>
-            <td style={{padding:"5px 6px",borderBottom:`1px solid ${P.bd}`,color:o.onHand>0?P.gn:P.td}}>{o.onHand.toLocaleString()}</td>
-            <td style={{padding:"5px 6px",borderBottom:`1px solid ${P.bd}`,color:od?P.ur:P.tx,fontWeight:od?700:400}}>{o.shipDate}</td>
-            <td style={{padding:"5px 6px",color:P.gn,fontWeight:600,borderBottom:`1px solid ${P.bd}`}}>${o.dollars.toLocaleString()}</td>
+    {showAdd&&<div style={{...cd(),background:C.sf2,border:`2px solid ${C.ac}`}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
+        {[{l:t.partName,k:"partName"},{l:t.die,k:"die"},{l:t.qty,k:"quantity",ty:"number"},{l:t.profitU,k:"profitPerUnit",ty:"number"}].map(f=><div key={f.k}><label style={{fontSize:7,color:C.tm}}>{f.l}</label><input style={inp} type={f.ty||"text"} value={nw[f.k]} onChange={e=>setNw({...nw,[f.k]:f.ty==="number"?parseFloat(e.target.value)||0:e.target.value})}/></div>)}
+        <div><label style={{fontSize:7,color:C.tm}}>{t.caster}</label><select style={inp} value={nw.assignedCaster} onChange={e=>setNw({...nw,assignedCaster:e.target.value})}>{MACH_LIST.map(m=><option key={m} value={m}>{m}</option>)}</select></div>
+      </div>
+      <div style={{display:"flex",gap:3,marginTop:5}}><button onClick={addOrd} style={bt("p")}>{t.save}</button><button onClick={()=>setShowAdd(false)} style={bt("o")}>{t.cancel}</button></div>
+    </div>}
+    <div style={{...cd({padding:0}),overflow:"auto",maxHeight:400}}>
+      <table style={{width:"100%",borderCollapse:"collapse",minWidth:700}}>
+        <thead><tr>{[t.priority,t.partName,t.die,t.qty,t.profitU,t.status,t.caster,""].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
+        <tbody>{filtered.filter(o=>!o.isDown).map(o=>{const isU=o.priority==="urgent";
+          return<tr key={o.id} style={{background:isU?`${C.ur}05`:"transparent"}}>
+            <td style={tdS}><EC value={o.priority} onChange={v=>upd(o.id,{priority:v})} options={priOpts}/></td>
+            <td style={{...tdS,fontWeight:600}}><EC value={o.partName} onChange={v=>upd(o.id,{partName:v})} color={isU?C.ur:C.tx}/></td>
+            <td style={{...tdS,color:C.ac,fontSize:8}}>{o.die||"—"}</td>
+            <td style={tdS}><EC value={o.quantity} onChange={v=>upd(o.id,{quantity:v})} type="number"/></td>
+            <td style={tdS}><EC value={o.profitPerUnit} onChange={v=>upd(o.id,{profitPerUnit:v})} type="number" color={C.gn}/></td>
+            <td style={tdS}><EC value={o.status} onChange={v=>upd(o.id,{status:v})} options={statusOpts}/></td>
+            <td style={{...tdS,fontSize:8}}><EC value={o.assignedCaster||""} onChange={v=>upd(o.id,{assignedCaster:v})} options={machOpts}/></td>
+            <td style={tdS}><div style={{display:"flex",gap:2}}>
+              <button onClick={()=>setEditId(o.id)} style={{...bt(),padding:"1px 3px",fontSize:7}}>✏️</button>
+              <button onClick={()=>togUrg(o.id)} style={{...bt(),padding:"1px 3px",fontSize:7,background:isU?`${C.ur}20`:"transparent"}}>🔥</button>
+              <button onClick={()=>setDelId(o.id)} style={{...bt(),padding:"1px 3px",fontSize:7,color:C.ur}}>✕</button>
+            </div></td>
           </tr>})}</tbody>
       </table>
     </div>
   </div>;
 
-  const pages={home:renderHome,dashboard:renderDash,gantt:renderGantt,chat:renderChat,orders:renderOrders};
+  // ─── $45K Target ──────────────────────────────────────
+  const DT=45e3;
+  const renderTargets=()=>{
+    const active=orders.filter(o=>!o.isDown&&o.quantity>0&&o.hasWork);
+    const pts=active.map(o=>{const dp=Math.ceil(o.quantity/5);const dr=dp*o.profitPerUnit;const ap=actProd[o.id]||0;return{...o,dp,dr,ap,ar:ap*o.profitPerUnit}}).sort((a,b)=>b.dr-a.dr);
+    const tP=pts.reduce((a,p)=>a+p.dr,0);const tA=pts.reduce((a,p)=>a+p.ar,0);
+    const wk=[];const now=new Date();for(let i=6;i>=0;i--){const d=new Date(now);d.setDate(d.getDate()-i);wk.push({l:d.toLocaleDateString(lang==="es"?"es":"en",{weekday:"short"}),a:i===0?tA:(28e3+Math.random()*24e3),t:DT})}
+    if(!orders.length)return<UploadPrompt/>;
+    return<div style={{display:"flex",flexDirection:"column",gap:12}}>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <div style={{...cd(),borderLeft:`3px solid ${C.ac}`,flex:1,minWidth:130}}><div style={{fontSize:7,color:C.tm,textTransform:"uppercase"}}>{t.target}</div><div style={{fontSize:24,fontWeight:900,color:C.ac}}>$45,000</div></div>
+        <div style={{...cd(),borderLeft:`3px solid ${tP>=DT?C.gn:C.ur}`,flex:1,minWidth:130}}><div style={{fontSize:7,color:C.tm,textTransform:"uppercase"}}>{t.projected}</div><div style={{fontSize:24,fontWeight:900,color:tP>=DT?C.gn:C.ur}}>${(tP/1e3).toFixed(1)}K</div><div style={{fontSize:8,color:tP>=DT?C.gn:C.ur}}>{tP>=DT?`✓ ${t.targetMet}`:`↓ ${t.below}`}</div></div>
+        <div style={{...cd(),flex:1,minWidth:130}}><div style={{fontSize:7,color:C.tm,textTransform:"uppercase"}}>{t.today}</div><div style={{fontSize:24,fontWeight:900,color:C.tx}}>${(tA/1e3).toFixed(1)}K</div></div>
+      </div>
+      <div style={cd()}><div style={{fontSize:11,fontWeight:700,color:C.tx,marginBottom:4}}>{t.weekTrend}</div><div style={{overflowX:"auto",display:"flex",justifyContent:"center"}}><Chart data={wk}/></div></div>
+      <div style={{...cd(),border:`1px solid ${C.ac}20`}}>
+        <div style={{fontSize:12,fontWeight:900,color:C.ac,marginBottom:4}}>📋 {t.guide}</div>
+        <div style={{overflow:"auto",maxHeight:280}}>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr>{[t.partName,t.die,t.dailyPcs,t.actual,t.revDay,t.pctTarget].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
+            <tbody>{pts.slice(0,12).map((p,i)=><tr key={p.id}>
+              <td style={{...tdS,fontWeight:600}}><div style={{display:"flex",alignItems:"center",gap:2}}><div style={{width:3,height:14,borderRadius:2,background:JC[i%JC.length]}}/>{p.partName}</div></td>
+              <td style={{...tdS,fontSize:7,color:C.ac}}>{p.die||"—"}</td>
+              <td style={tdS}><span style={{fontSize:12,fontWeight:900}}>{p.dp.toLocaleString()}</span></td>
+              <td style={tdS}><input type="number" value={actProd[p.id]||""} placeholder="0" onChange={e=>setActProd(pr=>({...pr,[p.id]:parseInt(e.target.value)||0}))} style={{background:C.sf3,color:C.tx,border:`1px solid ${C.bd}`,borderRadius:3,padding:"1px 3px",fontSize:10,fontWeight:700,width:48,outline:"none",textAlign:"center"}}/></td>
+              <td style={{...tdS,fontWeight:700,color:C.gn,fontSize:10}}>${p.dr.toFixed(0)}</td>
+              <td style={tdS}><div style={{width:26,height:3,background:C.sf3,borderRadius:2,overflow:"hidden"}}><div style={{width:`${Math.min((p.dr/DT)*100,100)}%`,height:"100%",background:JC[i%JC.length]}}/></div></td>
+            </tr>)}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>};
 
-  // ═════════════════════════════════════════════════════
+  // ─── People ───────────────────────────────────────────
+  const renderPeople=()=><div style={{display:"flex",flexDirection:"column",gap:12}}>
+    <div style={{fontSize:14,fontWeight:900,color:C.tx}}>👷 {t.workers}</div>
+    <div style={{...cd({padding:0}),overflow:"auto"}}>
+      <table style={{width:"100%",borderCollapse:"collapse"}}>
+        <thead><tr>{[t.workerName,t.workerMachine,t.workerShift,t.workerLang,t.workerRole,""].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
+        <tbody>{workers.map((w,i)=><tr key={w.id}>
+          <td style={tdS}><input value={w.name} placeholder={lang==="en"?"Enter name":"Nombre"} onChange={e=>{const nw=[...workers];nw[i]={...w,name:e.target.value};setWorkers(nw)}} style={{...inp,background:"transparent",border:"none",borderBottom:`1px dashed ${C.bd2}`,borderRadius:0,padding:"2px 0"}}/></td>
+          <td style={tdS}><select value={w.machine} onChange={e=>{const nw=[...workers];nw[i]={...w,machine:e.target.value};setWorkers(nw)}} style={{background:C.sf3,color:C.tx,border:`1px solid ${C.bd}`,borderRadius:4,padding:"2px",fontSize:9,cursor:"pointer"}}>{MACH_LIST.map(m=><option key={m} value={m}>{m}</option>)}</select></td>
+          <td style={tdS}><select value={w.shift} onChange={e=>{const nw=[...workers];nw[i]={...w,shift:parseInt(e.target.value)};setWorkers(nw)}} style={{background:C.sf3,color:C.tx,border:`1px solid ${C.bd}`,borderRadius:4,padding:"2px",fontSize:9,cursor:"pointer"}}>{shiftOpts.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}</select></td>
+          <td style={tdS}><select value={w.lang} onChange={e=>{const nw=[...workers];nw[i]={...w,lang:e.target.value};setWorkers(nw)}} style={{background:C.sf3,color:C.tx,border:`1px solid ${C.bd}`,borderRadius:4,padding:"2px",fontSize:9,cursor:"pointer"}}>{langOpts.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}</select></td>
+          <td style={tdS}><select value={w.role} onChange={e=>{const nw=[...workers];nw[i]={...w,role:e.target.value};setWorkers(nw)}} style={{background:C.sf3,color:C.tx,border:`1px solid ${C.bd}`,borderRadius:4,padding:"2px",fontSize:9,cursor:"pointer"}}>{roleOpts.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}</select></td>
+          <td style={tdS}><button onClick={()=>setWorkers(p=>p.filter((_,j)=>j!==i))} style={{...bt(),padding:"1px 3px",fontSize:7,color:C.ur}}>✕</button></td>
+        </tr>)}</tbody>
+      </table>
+    </div>
+    <button onClick={()=>setWorkers(p=>[...p,{id:`W${Date.now()}`,name:"",machine:"M4",shift:1,lang:"es",role:"operator"}])} style={bt("p")}>{t.addWorker}</button>
+
+    <div style={{fontSize:14,fontWeight:900,color:C.tx,marginTop:8}}>🧑‍💼 {t.supervisors}</div>
+    <div style={{...cd({padding:0}),overflow:"auto"}}>
+      <table style={{width:"100%",borderCollapse:"collapse"}}>
+        <thead><tr>{[t.workerName,t.workerMachine+"s",t.workerShift,""].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
+        <tbody>{supers.map((s,i)=><tr key={s.id}>
+          <td style={tdS}><input value={s.name} placeholder={lang==="en"?"Enter name":"Nombre"} onChange={e=>{const ns=[...supers];ns[i]={...s,name:e.target.value};setSupers(ns)}} style={{...inp,background:"transparent",border:"none",borderBottom:`1px dashed ${C.bd2}`,borderRadius:0,padding:"2px 0"}}/></td>
+          <td style={{...tdS,fontSize:8}}>{s.machines?.join(", ")||"—"}</td>
+          <td style={tdS}><select value={s.shift} onChange={e=>{const ns=[...supers];ns[i]={...s,shift:parseInt(e.target.value)};setSupers(ns)}} style={{background:C.sf3,color:C.tx,border:`1px solid ${C.bd}`,borderRadius:4,padding:"2px",fontSize:9,cursor:"pointer"}}>{shiftOpts.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}</select></td>
+          <td style={tdS}><button onClick={()=>setSupers(p=>p.filter((_,j)=>j!==i))} style={{...bt(),padding:"1px 3px",fontSize:7,color:C.ur}}>✕</button></td>
+        </tr>)}</tbody>
+      </table>
+    </div>
+    <button onClick={()=>setSupers(p=>[...p,{id:`S${Date.now()}`,name:"",machines:MACH_LIST,shift:1,role:"supervisor"}])} style={bt("p")}>{t.addSuper}</button>
+  </div>;
+
+  // ─── Machines ─────────────────────────────────────────
+  const renderMach=()=><div style={{display:"flex",flexDirection:"column",gap:10}}>
+    <div style={{fontSize:13,fontWeight:800,color:C.tx}}>Casting (M2–M14)</div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(145px,1fr))",gap:6}}>
+      {MACH_LIST.map(m=>{const info=MI[m];const asgn=orders.filter(o=>o.assignedCaster===m&&!o.isDown);const isDown=orders.some(o=>o.assignedCaster===m&&o.isDown);const w1=workers.find(w=>w.machine===m&&w.shift===1);const w2=workers.find(w=>w.machine===m&&w.shift===2);
+        return<div key={m} style={{...cd({padding:10}),border:`1px solid ${isDown?C.ur:asgn.length>0?C.gn:C.bd}20`,position:"relative",overflow:"hidden",cursor:"pointer"}} onClick={()=>setPage("castGantt")}>
+          <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:isDown?C.ur:asgn.length>0?C.gn:C.td}}/>
+          <div style={{fontSize:14,fontWeight:900,color:isDown?C.ur:C.tx}}>{m}</div>
+          <div style={{fontSize:8,color:C.tm}}>{t[info?.type]} {info?.ton>0?`• ${info.ton}T`:""}</div>
+          {asgn.length>0&&<div style={{fontSize:7,color:C.gn,marginTop:3}}>{asgn.length} {t.jobs} • {asgn.reduce((a,j)=>a+j.quantity,0).toLocaleString()} {t.pcs}</div>}
+          {isDown&&<div style={{fontSize:8,color:C.ur,fontWeight:700,marginTop:3}}>{t.machDown}</div>}
+          {(w1?.name||w2?.name)&&<div style={{fontSize:7,color:C.tm,marginTop:2}}>{t.first}: {w1?.name||"—"} | {t.second}: {w2?.name||"—"}</div>}
+        </div>})}
+    </div>
+    <div style={{fontSize:13,fontWeight:800,color:C.tx,marginTop:6}}>Haas & Secondary</div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(145px,1fr))",gap:6}}>
+      {HAAS.map(m=><div key={m} style={{...cd({padding:10})}}><div style={{fontSize:12,fontWeight:800,color:C.tx}}>{m}</div><div style={{fontSize:8,color:C.tm}}>{m.includes("Haas")?"Haas CNC":"Hand Dipping"}</div></div>)}
+    </div>
+  </div>;
+
+  // ─── Painting / Scheduling (compact) ──────────────────
+  const renderPaint=()=>{const po=orders.filter(o=>o.needsPaint&&!o.isDown);return<div style={{display:"flex",flexDirection:"column",gap:8}}>
+    <div style={{...cd(),borderLeft:`3px solid ${C.cy}`}}><div style={{fontSize:12,fontWeight:800}}>{t.paintDept}</div><div style={{fontSize:8,color:C.tm}}>{po.length} parts</div></div>
+    <div style={{...cd({padding:0}),overflow:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr>{[t.partName,t.die,t.qty,t.status,t.caster].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
+      <tbody>{po.map(o=><tr key={o.id}><td style={{...tdS,fontWeight:600}}>{o.partName}</td><td style={{...tdS,color:C.ac,fontSize:8}}>{o.die}</td><td style={tdS}>{o.quantity?.toLocaleString()}</td><td style={tdS}><EC value={o.status} onChange={v=>upd(o.id,{status:v})} options={statusOpts}/></td><td style={{...tdS,fontSize:8}}>{o.assignedCaster}</td></tr>)}</tbody></table></div>
+  </div>};
+
+  const renderSched=()=><div style={{display:"flex",flexDirection:"column",gap:10}}>
+    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}><button onClick={runSched} style={bt("p")} disabled={isOpt}>{isOpt?"⏳":`⚡ ${t.run}`}</button></div>
+    <div style={cd()}><div style={{fontSize:11,fontWeight:700,color:C.tx,marginBottom:6}}>Die Batch Groups</div>
+      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{[...new Set(orders.map(o=>o.die).filter(Boolean))].map(die=>{const b=orders.filter(o=>o.die===die);
+        return<div key={die} style={{background:C.sf2,borderRadius:5,padding:6,minWidth:100,border:`1px solid ${C.bd}`}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.ac}}>{die}</div><div style={{fontSize:8,color:C.tm}}>{b.length} parts</div>
+          {b.slice(0,3).map(o=><div key={o.id} onClick={()=>setEditId(o.id)} style={{fontSize:7,color:C.tx,cursor:"pointer",marginTop:1}}>{o.partName}</div>)}
+        </div>})}</div>
+    </div>
+  </div>;
+
+  // ─── AI Planner ───────────────────────────────────────
+  const[aiOrders,setAiOrders]=useState([{id:1,part:"",die:"",qty:0,machType:"al400",deadline:"",priority:"normal",profitPerUnit:0}]);
+  const[aiPlan,setAiPlan]=useState(null);
+  const[aiLoading,setAiLoading]=useState(false);
+  const[aiError,setAiError]=useState("");
+
+  const addAiOrder=()=>setAiOrders(p=>[...p,{id:Date.now(),part:"",die:"",qty:0,machType:"al400",deadline:"",priority:"normal",profitPerUnit:0}]);
+  const updAiOrder=(id,k,v)=>setAiOrders(p=>p.map(o=>o.id===id?{...o,[k]:v}:o));
+  const delAiOrder=id=>setAiOrders(p=>p.filter(o=>o.id!==id));
+
+  const runAiPlan=async()=>{
+    const validOrders=aiOrders.filter(o=>o.part&&o.qty>0);
+    if(!validOrders.length){setAiError(lang==="en"?"Add at least one order with part name and quantity":"Agrega al menos una orden con nombre y cantidad");return}
+    setAiLoading(true);setAiError("");setAiPlan(null);
+    const existingJobs=orders.filter(o=>!o.isDown&&o.hasWork).map(o=>`${o.assignedCaster}: ${o.partName} (Die:${o.die||"?"}, Bal:${o.quantity}, Shifts:${o.totalShifts})`).join("\n");
+    const prompt=`You are an expert die casting production scheduler for NIDC, an aluminum die casting company in Estherville, Iowa.
+
+NIDC MACHINES:
+- M2, M3: Zinc cold chamber (small parts)
+- M4, M5, M6, M7, M8, M9, M10: Aluminum 400-ton (medium parts)
+- M11: Auto fan (400-ton, specialized)
+- M12, M13: Aluminum 600-ton (larger parts)
+- M14: Aluminum 800-ton (biggest parts)
+- M8 is currently DOWN — do NOT schedule anything on M8
+
+CONSTRAINTS:
+- Die changes take 3-5 hours (lost production)
+- Each machine runs 2 shifts/day (1st and 2nd), 6 days/week (Mon-Sat)
+- Average parts per shift varies: zinc ~500, 400T ~300-500, 600T ~200-300, 800T ~150-250
+- 10% scrap allowance (cast 10% more than needed)
+- Daily revenue target: $45,000
+- Same die on same machine = no die change needed (batch together!)
+- Group parts by die to minimize changeovers
+
+CURRENTLY RUNNING (do not reschedule these):
+${existingJobs||"No current jobs"}
+
+NEW ORDERS TO SCHEDULE:
+${validOrders.map((o,i)=>`${i+1}. Part: ${o.part}, Die: ${o.die||"TBD"}, Qty: ${o.qty}, Machine Type: ${o.machType}, Deadline: ${o.deadline||"ASAP"}, Priority: ${o.priority}, $/Unit: ${o.profitPerUnit||"TBD"}`).join("\n")}
+
+RESPOND ONLY IN THIS EXACT JSON FORMAT (no markdown, no backticks):
+{
+  "schedule": [
+    {"part":"PartName","die":"DieNum","machine":"M4","qty":1000,"shifts_1st":[3,2,1,0,0,0],"shifts_2nd":[3,2,1,0,0,0],"reason":"Why this machine and sequence"}
+  ],
+  "die_changes": [
+    {"machine":"M4","from":"D101","to":"D202","when":"Wednesday after 1st shift","downtime_hrs":4}
+  ],
+  "daily_revenue": [45000,43000,47000,45000,44000,20000],
+  "risks": ["Risk description 1","Risk description 2"],
+  "recommendations": ["Recommendation 1","Recommendation 2"],
+  "summary": "Brief summary of the plan"
+}`;
+
+    try{
+      const resp=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2000,
+          messages:[{role:"user",content:prompt}]})
+      });
+      const data=await resp.json();
+      const text=data.content?.map(c=>c.text||"").join("")||"";
+      const clean=text.replace(/```json|```/g,"").trim();
+      const plan=JSON.parse(clean);
+      setAiPlan(plan);
+    }catch(e){
+      console.error("AI error:",e);
+      setAiError(lang==="en"?"AI planning failed. Check console for details.":"Error en planificación AI. Revisa la consola.");
+    }finally{setAiLoading(false)}
+  };
+
+  const applyAiPlan=()=>{
+    if(!aiPlan?.schedule)return;
+    const newOrders=aiPlan.schedule.map((s,i)=>{
+      const sh=[];for(let d=0;d<6;d++)sh.push([s.shifts_1st?.[d]||0,s.shifts_2nd?.[d]||0]);
+      return{
+        id:`AI${Date.now()}-${i}`,partName:s.part,die:s.die||"",quantity:s.qty||0,
+        castQuantity:Math.ceil((s.qty||0)*1.1),
+        profitPerUnit:aiOrders.find(o=>o.part===s.part)?.profitPerUnit||0,
+        totalProfit:((s.qty||0)*(aiOrders.find(o=>o.part===s.part)?.profitPerUnit||0)).toFixed(2),
+        priority:aiOrders.find(o=>o.part===s.part)?.priority||"normal",
+        status:"casting",assignedCaster:s.machine,machine:s.machine,
+        needsHaas:false,needsPaint:false,batchGroup:s.die||s.part,
+        notes:s.reason||"",shopOrder:"",shifts:sh,isDown:false,
+        hasWork:sh.some(x=>x[0]>0||x[1]>0),
+        totalShifts:sh.reduce((a,x)=>a+x[0]+x[1],0),
+        machineType:MI[s.machine]?.type||"al400",
+      };
+    });
+    setOrders(p=>[...p,...newOrders]);
+    // Save to Supabase
+    const weekStart=weekDates[0]||"ai-planned";
+    newOrders.forEach(o=>{
+      db.insert("jobs",[{machine:o.machine,part:o.partName,die:o.die,balance:o.quantity,priority:o.priority,status:"casting",assigned_caster:o.assignedCaster,shifts:JSON.stringify(o.shifts),is_down:false,profit_per_unit:o.profitPerUnit,week_start:weekStart,notes:o.notes}]);
+    });
+    setPage("castGantt");flash(lang==="en"?"AI plan applied to schedule!":"¡Plan AI aplicado al programa!");
+  };
+
+  const mtOpts=[{v:"zinc",l:"Zinc (M2-M3)"},{v:"al400",l:"400T (M4-M10)"},{v:"al600",l:"600T (M12-M13)"},{v:"al800",l:"800T (M14)"},{v:"autoFan",l:"Auto Fan (M11)"}];
+
+  const renderAiPlan=()=><div style={{display:"flex",flexDirection:"column",gap:14}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6}}>
+      <div>
+        <div style={{fontSize:16,fontWeight:900,color:C.ac}}>🤖 {lang==="en"?"AI Production Planner":"Planificador AI de Producción"}</div>
+        <div style={{fontSize:9,color:C.tm}}>{lang==="en"?"Enter your orders → AI creates the optimal weekly schedule":"Ingresa tus órdenes → AI crea el programa semanal óptimo"}</div>
+      </div>
+    </div>
+
+    {/* Order Entry */}
+    <div style={cd()}>
+      <div style={{fontSize:12,fontWeight:800,color:C.tx,marginBottom:8}}>{lang==="en"?"📦 Orders to Schedule":"📦 Órdenes a Programar"}</div>
+      <div style={{overflow:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",minWidth:700}}>
+          <thead><tr>{[lang==="en"?"Part Name":"Parte",lang==="en"?"Die #":"Molde",lang==="en"?"Quantity":"Cant.",lang==="en"?"Machine Type":"Tipo Máq.",lang==="en"?"Deadline":"Fecha Límite",lang==="en"?"Priority":"Prioridad","$/Unit",""].map((h,i)=>
+            <th key={i} style={thS}>{h}</th>)}</tr></thead>
+          <tbody>{aiOrders.map(o=><tr key={o.id}>
+            <td style={tdS}><input value={o.part} placeholder={lang==="en"?"e.g. HXE158115":"ej. HXE158115"} onChange={e=>updAiOrder(o.id,"part",e.target.value)} style={{...inp,background:"transparent",borderBottom:`1px dashed ${C.bd2}`,borderRadius:0}}/></td>
+            <td style={tdS}><input value={o.die} placeholder="D123" onChange={e=>updAiOrder(o.id,"die",e.target.value)} style={{...inp,width:70,background:"transparent",borderBottom:`1px dashed ${C.bd2}`,borderRadius:0}}/></td>
+            <td style={tdS}><input type="number" value={o.qty||""} placeholder="0" onChange={e=>updAiOrder(o.id,"qty",parseInt(e.target.value)||0)} style={{...inp,width:70,background:"transparent",borderBottom:`1px dashed ${C.bd2}`,borderRadius:0,textAlign:"center"}}/></td>
+            <td style={tdS}><select value={o.machType} onChange={e=>updAiOrder(o.id,"machType",e.target.value)} style={{background:C.sf3,color:C.tx,border:`1px solid ${C.bd}`,borderRadius:4,padding:"3px",fontSize:9,cursor:"pointer"}}>{mtOpts.map(x=><option key={x.v} value={x.v}>{x.l}</option>)}</select></td>
+            <td style={tdS}><input type="date" value={o.deadline} onChange={e=>updAiOrder(o.id,"deadline",e.target.value)} style={{...inp,width:120,background:"transparent",borderBottom:`1px dashed ${C.bd2}`,borderRadius:0}}/></td>
+            <td style={tdS}><select value={o.priority} onChange={e=>updAiOrder(o.id,"priority",e.target.value)} style={{background:C.sf3,color:C.tx,border:`1px solid ${C.bd}`,borderRadius:4,padding:"3px",fontSize:9,cursor:"pointer"}}>{priOpts.map(x=><option key={x.v} value={x.v}>{x.l}</option>)}</select></td>
+            <td style={tdS}><input type="number" value={o.profitPerUnit||""} placeholder="$" onChange={e=>updAiOrder(o.id,"profitPerUnit",parseFloat(e.target.value)||0)} style={{...inp,width:55,background:"transparent",borderBottom:`1px dashed ${C.bd2}`,borderRadius:0,textAlign:"center"}}/></td>
+            <td style={tdS}><button onClick={()=>delAiOrder(o.id)} style={{...bt(),padding:"1px 4px",fontSize:8,color:C.ur}}>✕</button></td>
+          </tr>)}</tbody>
+        </table>
+      </div>
+      <div style={{display:"flex",gap:6,marginTop:8}}>
+        <button onClick={addAiOrder} style={bt("o")}>{lang==="en"?"+ Add Order":"+ Agregar Orden"}</button>
+        <button onClick={runAiPlan} disabled={aiLoading} style={{...bt("p"),padding:"8px 20px",fontSize:12}}>
+          {aiLoading?"⏳ AI is thinking...":`🤖 ${lang==="en"?"Generate AI Schedule":"Generar Programa AI"}`}
+        </button>
+      </div>
+      {aiError&&<div style={{marginTop:6,fontSize:10,color:C.ur,padding:"6px 10px",background:`${C.ur}10`,borderRadius:6}}>❌ {aiError}</div>}
+    </div>
+
+    {/* AI Results */}
+    {aiPlan&&<div style={{display:"flex",flexDirection:"column",gap:10}}>
+      {/* Summary */}
+      <div style={{...cd(),border:`2px solid ${C.ac}30`,background:`${C.ac}05`}}>
+        <div style={{fontSize:13,fontWeight:900,color:C.ac,marginBottom:4}}>🤖 {lang==="en"?"AI Recommendation":"Recomendación AI"}</div>
+        <div style={{fontSize:11,color:C.tx,lineHeight:1.5}}>{aiPlan.summary}</div>
+        <button onClick={applyAiPlan} style={{...bt("p"),marginTop:10,padding:"8px 20px",fontSize:12}}>
+          ✅ {lang==="en"?"Apply This Plan to Schedule":"Aplicar Este Plan al Programa"}
+        </button>
+      </div>
+
+      {/* Schedule */}
+      {aiPlan.schedule?.length>0&&<div style={cd()}>
+        <div style={{fontSize:12,fontWeight:800,color:C.tx,marginBottom:6}}>📋 {lang==="en"?"Proposed Schedule":"Programa Propuesto"}</div>
+        <div style={{overflow:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr>{[lang==="en"?"Part":"Parte",lang==="en"?"Die":"Molde",lang==="en"?"Machine":"Máq.","Qty","Mon","Tue","Wed","Thu","Fri","Sat",lang==="en"?"Reason":"Razón"].map((h,i)=>
+            <th key={i} style={thS}>{h}</th>)}</tr></thead>
+          <tbody>{aiPlan.schedule.map((s,i)=><tr key={i}>
+            <td style={{...tdS,fontWeight:700}}>{s.part}</td>
+            <td style={{...tdS,color:C.ac,fontSize:9}}>{s.die||"—"}</td>
+            <td style={{...tdS,fontWeight:700,color:C.bl}}>{s.machine}</td>
+            <td style={tdS}>{s.qty?.toLocaleString()}</td>
+            {[0,1,2,3,4,5].map(d=>{const s1=s.shifts_1st?.[d]||0;const s2=s.shifts_2nd?.[d]||0;
+              return<td key={d} style={{...tdS,textAlign:"center"}}>
+                {(s1>0||s2>0)?<div><span style={{fontSize:9,fontWeight:700,color:C.or}}>{s1}</span><span style={{fontSize:7,color:C.td}}>/</span><span style={{fontSize:9,fontWeight:700,color:C.bl}}>{s2}</span></div>:<span style={{color:C.td}}>—</span>}
+              </td>})}
+            <td style={{...tdS,fontSize:8,color:C.tm,maxWidth:150}}>{s.reason}</td>
+          </tr>)}</tbody>
+        </table></div>
+      </div>}
+
+      {/* Die Changes */}
+      {aiPlan.die_changes?.length>0&&<div style={cd()}>
+        <div style={{fontSize:12,fontWeight:800,color:C.or,marginBottom:6}}>🔄 {lang==="en"?"Die Changes":"Cambios de Molde"} ({aiPlan.die_changes.length})</div>
+        {aiPlan.die_changes.map((dc,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 0",borderBottom:`1px solid ${C.bd}`}}>
+          <span style={{fontSize:12,fontWeight:800,color:C.tx}}>{dc.machine}</span>
+          <span style={{fontSize:9,padding:"1px 5px",borderRadius:3,background:`${C.or}15`,color:C.or}}>{dc.from} → {dc.to}</span>
+          <span style={{fontSize:8,color:C.tm}}>{dc.when}</span>
+          <span style={{fontSize:8,color:C.ur}}>⏱ {dc.downtime_hrs}h</span>
+        </div>)}
+      </div>}
+
+      {/* Daily Revenue */}
+      {aiPlan.daily_revenue?.length>0&&<div style={cd()}>
+        <div style={{fontSize:12,fontWeight:800,color:C.tx,marginBottom:6}}>💰 {lang==="en"?"Projected Daily Revenue":"Ingresos Diarios Proyectados"}</div>
+        <div style={{display:"flex",gap:4}}>
+          {aiPlan.daily_revenue.map((rev,i)=>{const pct=Math.min((rev/45e3)*100,100);const days=["Mon","Tue","Wed","Thu","Fri","Sat"];
+            return<div key={i} style={{flex:1,textAlign:"center"}}>
+              <div style={{height:60,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
+                <div style={{background:rev>=45e3?C.gn:rev>35e3?C.ac:C.or,borderRadius:"3px 3px 0 0",height:`${Math.max(pct,5)}%`}}/>
+              </div>
+              <div style={{fontSize:9,fontWeight:700,color:rev>=45e3?C.gn:C.tx,marginTop:2}}>${(rev/1e3).toFixed(0)}K</div>
+              <div style={{fontSize:7,color:C.tm}}>{days[i]}</div>
+            </div>})}
+        </div>
+      </div>}
+
+      {/* Risks */}
+      {aiPlan.risks?.length>0&&<div style={{...cd(),border:`1px solid ${C.ur}20`}}>
+        <div style={{fontSize:12,fontWeight:800,color:C.ur,marginBottom:4}}>⚠️ {lang==="en"?"Risks":"Riesgos"}</div>
+        {aiPlan.risks.map((r,i)=><div key={i} style={{fontSize:10,color:C.or,padding:"2px 0"}}>• {r}</div>)}
+      </div>}
+
+      {/* Recommendations */}
+      {aiPlan.recommendations?.length>0&&<div style={{...cd(),border:`1px solid ${C.gn}20`}}>
+        <div style={{fontSize:12,fontWeight:800,color:C.gn,marginBottom:4}}>💡 {lang==="en"?"Recommendations":"Recomendaciones"}</div>
+        {aiPlan.recommendations.map((r,i)=><div key={i} style={{fontSize:10,color:C.tx,padding:"2px 0"}}>• {r}</div>)}
+      </div>}
+    </div>}
+  </div>;
+
+  // ─── AI Chat ───────────────────────────────────────────
+  const sendAiMessage=async()=>{
+    if(!userMsg.trim()||aiLoading)return;
+    const msg=userMsg.trim();setUserMsg("");
+    setAiChat(prev=>[...prev,{role:"user",text:msg}]);
+    setAiLoading(true);
+    const ctx=`You are an AI assistant for NIDC die casting (Estherville, Iowa). Machines: M2-M3(zinc), M4-M10(400T AL), M11(auto fan), M12-M13(600T), M14(800T). M8 is DOWN. Die changes 3-5hrs. 2 shifts/day Mon-Thu, Friday limited (2-3 machines). $45K daily revenue target. 10% scrap. ${orders.length} active orders, ${shippingOrders.length} shipping orders. Answer concisely (<150 words).`;
+    try{
+      const resp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:800,messages:[{role:"user",content:`${ctx}\n\nUser: ${msg}`}]})});
+      const data=await resp.json();
+      setAiChat(prev=>[...prev,{role:"ai",text:data.content?.map(c=>c.text||"").join("")||"No response"}]);
+    }catch{setAiChat(prev=>[...prev,{role:"ai",text:"Error connecting to AI."}])}finally{setAiLoading(false)}
+  };
+
+  const renderAiChat=()=><div style={{display:"flex",flexDirection:"column",gap:8,height:"70vh"}}>
+    <div style={{fontSize:15,fontWeight:900,color:C.ac}}>🤖 {lang==="en"?"AI Production Assistant":"Asistente AI de Producción"}</div>
+    <div style={{fontSize:9,color:C.tm}}>{lang==="en"?"Ask about scheduling, capacity, priorities, die changes...":"Pregunta sobre programación, capacidad, prioridades..."}</div>
+    <div style={{flex:1,overflow:"auto",...cd({padding:10})}}>
+      {aiChat.length===0&&<div style={{textAlign:"center",color:C.td,fontSize:10,padding:16}}>
+        {lang==="en"?"Try asking:":"Prueba preguntar:"}<br/><br/>
+        "What should I prioritize this week?"<br/>
+        "Which machines have open capacity?"<br/>
+        "How should I schedule 3000 pcs of H169912?"<br/>
+        "What are the biggest risks in my current plan?"
+      </div>}
+      {aiChat.map((m,i)=><div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start",marginBottom:6}}>
+        <div style={{maxWidth:"80%",padding:"7px 11px",borderRadius:8,background:m.role==="user"?C.ac:`${C.bl}18`,color:m.role==="user"?"#000":C.tx,fontSize:10,lineHeight:1.5}}>
+          {m.role==="ai"&&<span style={{fontSize:8,color:C.bl,fontWeight:700}}>🤖 </span>}{m.text}
+        </div>
+      </div>)}
+      {aiLoading&&<div style={{fontSize:9,color:C.ac,padding:6}}>🤖 Thinking...</div>}
+    </div>
+    <div style={{display:"flex",gap:4}}>
+      <input value={userMsg} onChange={e=>setUserMsg(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")sendAiMessage()}}
+        placeholder={lang==="en"?"Ask about your production...":"Pregunta sobre tu producción..."}
+        style={{flex:1,padding:"8px 12px",borderRadius:7,border:`1px solid ${C.bd2}`,background:C.sf2,color:C.tx,fontSize:11,outline:"none"}}/>
+      <button onClick={sendAiMessage} disabled={aiLoading} style={bt("p")}>{lang==="en"?"Send":"Enviar"}</button>
+    </div>
+  </div>;
+
+  const pages={dashboard:renderDash,planning:renderPlanning,castGantt:renderCastGantt,targets:renderTargets,orders:renderOrders,aiPlan:renderAiPlan,aiChat:renderAiChat,people:renderPeople,machines:renderMach,scheduling:renderSched,painting:renderPaint};
+
+  // ═══ RENDER ═══════════════════════════════════════════
   return(
-    <div style={{minHeight:"100vh",background:P.bg,color:P.tx,fontFamily:"'Segoe UI',-apple-system,sans-serif"}}>
-      <Head><title>CastFlow AI — NIDC</title><meta name="viewport" content="width=device-width, initial-scale=1"/></Head>
-      <style>{`*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:${P.sf}}::-webkit-scrollbar-thumb{background:${P.bd2};border-radius:3px}select option{background:${P.sf2};color:${P.tx}}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
+    <div style={{minHeight:"100vh",background:C.bg,color:C.tx,fontFamily:"'Segoe UI',-apple-system,sans-serif"}}>
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-track{background:${C.sf}}::-webkit-scrollbar-thumb{background:${C.bd2};border-radius:3px}select option{background:${C.sf2};color:${C.tx}}`}</style>
 
       {/* Top Bar */}
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 16px",background:P.sf,borderBottom:`1px solid ${P.bd}`,position:"sticky",top:0,zIndex:100}}>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <div style={{width:30,height:30,borderRadius:7,background:`linear-gradient(135deg,${P.ac},${P.or})`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:10,color:"#000"}}>AI</div>
-          <div><div style={{fontSize:13,fontWeight:800}}>CastFlow AI — NIDC</div>
-            {fileName&&<div style={{fontSize:8,color:P.ac}}>📁 {fileName} · {allOrders.length} orders</div>}
-          </div>
-        </div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 14px",background:C.sf,borderBottom:`1px solid ${C.bd}`,position:"sticky",top:0,zIndex:100}}>
         <div style={{display:"flex",alignItems:"center",gap:6}}>
-          {allOrders.length>0&&<button onClick={()=>fileRef.current?.click()} style={bt("o")}>📂 New File</button>}
+          <div style={{width:26,height:26,borderRadius:5,background:`linear-gradient(135deg,${C.ac},${C.or})`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:9,color:"#000"}}>CF</div>
+          <div><div style={{fontSize:12,fontWeight:800}}>{t.app}</div>{weekLabel?<div style={{fontSize:7,color:C.ac}}>{t.weekOf} {weekLabel} <span style={{color:dbStatus==="connected"?C.gn:C.td}}>● {dbStatus==="connected"?"Synced":"Local"}</span></div>:<div style={{fontSize:7,color:dbStatus==="connected"?C.gn:C.td}}>● {dbStatus==="connected"?"Connected":"Offline"}</div>}</div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:5}}>
+          <div style={{position:"relative"}}>
+            <button onClick={()=>setShowNotif(!showNotif)} style={{...bt(),padding:3,position:"relative"}}>⚠️{urgents.length>0&&<span style={{position:"absolute",top:0,right:0,width:5,height:5,borderRadius:"50%",background:C.ur,animation:"pulse 1s infinite"}}/>}</button>
+            {showNotif&&<div style={{position:"absolute",top:32,right:0,width:220,...cd(),boxShadow:"0 6px 20px rgba(0,0,0,.5)",zIndex:200}}>
+              {urgents.length===0?<div style={{fontSize:8,color:C.tm}}>{t.noUrgent}</div>:urgents.map(o=><div key={o.id} onClick={()=>{setEditId(o.id);setShowNotif(false)}} style={{padding:"3px 0",fontSize:8,color:C.ur,cursor:"pointer",borderBottom:`1px solid ${C.bd}`}}>🔴 {o.partName}</div>)}
+            </div>}
+          </div>
+          <button onClick={()=>fileRef.current?.click()} style={{...bt("p"),padding:"3px 7px",fontSize:8}}>{isLoading?"⏳":"📂"} {t.upload}</button>
           <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={e=>{handleFile(e.target.files[0]);e.target.value=""}}/>
-          <button onClick={()=>setLang(l=>l==="en"?"es":"en")} style={bt("o")}>{lang==="en"?"🇺🇸":"🇲🇽"}</button>
+          <button onClick={()=>setLang(l=>l==="en"?"es":"en")} style={{...bt("o"),padding:"3px 6px",fontSize:8}}>{lang==="en"?"🇺🇸":"🇲🇽"}</button>
         </div>
       </div>
 
       {/* Nav */}
-      {allOrders.length>0&&<div style={{display:"flex",gap:2,padding:"5px 16px",background:P.sf,borderBottom:`1px solid ${P.bd}`,overflowX:"auto"}}>
-        {[{id:"dashboard",ic:"📊",l:"Dashboard"},{id:"gantt",ic:"🏭",l:"Schedule"},{id:"chat",ic:"🤖",l:"AI Chat"},{id:"orders",ic:"📦",l:"Orders"}].map(n=>
-          <button key={n.id} onClick={()=>setPage(n.id)} style={pill(page===n.id)}><span style={{fontSize:12}}>{n.ic}</span>{n.l}</button>)}
-      </div>}
+      <div style={{display:"flex",gap:1,padding:"4px 14px",background:C.sf,borderBottom:`1px solid ${C.bd}`,overflowX:"auto"}}>
+        {[{id:"dashboard",ic:"📊"},{id:"aiPlan",ic:"🤖"},{id:"aiChat",ic:"💬"},{id:"planning",ic:"📋"},{id:"castGantt",ic:"🏭"},{id:"targets",ic:"🎯"},{id:"orders",ic:"📦"},{id:"people",ic:"👷"},{id:"machines",ic:"⚙️"},{id:"scheduling",ic:"🔄"},{id:"painting",ic:"🎨"}].map(n=>
+          <button key={n.id} onClick={()=>setPage(n.id)} style={pill(page===n.id)}><span style={{fontSize:11}}>{n.ic}</span>{t[n.id]||n.id}</button>)}
+      </div>
 
-      <div style={{padding:"14px 16px",maxWidth:1400,margin:"0 auto"}}>{(pages[page]||renderHome)()}</div>
+      <div style={{padding:"12px 14px",maxWidth:1400,margin:"0 auto"}}>{(pages[page]||renderDash)()}</div>
 
-      {toast&&<div style={{position:"fixed",bottom:16,right:16,zIndex:2e3,background:P.gn,color:"#fff",padding:"8px 18px",borderRadius:8,fontWeight:700,fontSize:11,boxShadow:"0 4px 16px rgba(0,0,0,.3)"}}>{toast}</div>}
+      {/* Edit Modal */}
+      <Modal open={!!editId&&!!eo} onClose={()=>setEditId(null)} title={eo?`${t.edit}: ${eo.partName}`:""} ch={eo?<div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+          {[{l:t.partName,k:"partName"},{l:t.die,k:"die"},{l:t.qty,k:"quantity",ty:"number"},{l:t.profitU,k:"profitPerUnit",ty:"number"},{l:t.shopOrder,k:"shopOrder"}].map(f=>
+            <div key={f.k}><label style={{fontSize:7,color:C.tm}}>{f.l}</label><input style={inp} type={f.ty||"text"} value={eo[f.k]||""} onChange={e=>upd(eo.id,{[f.k]:f.ty==="number"?parseFloat(e.target.value)||0:e.target.value})}/></div>)}
+          <div><label style={{fontSize:7,color:C.tm}}>{t.priority}</label><select style={inp} value={eo.priority} onChange={e=>upd(eo.id,{priority:e.target.value})}>{priOpts.map(x=><option key={x.v} value={x.v}>{x.l}</option>)}</select></div>
+          <div><label style={{fontSize:7,color:C.tm}}>{t.status}</label><select style={inp} value={eo.status} onChange={e=>upd(eo.id,{status:e.target.value})}>{statusOpts.map(x=><option key={x.v} value={x.v}>{x.l}</option>)}</select></div>
+          <div><label style={{fontSize:7,color:C.tm}}>{t.caster}</label><select style={inp} value={eo.assignedCaster||""} onChange={e=>upd(eo.id,{assignedCaster:e.target.value})}>{machOpts.map(x=><option key={x.v} value={x.v}>{x.l}</option>)}</select></div>
+        </div>
+        <textarea value={eo.notes||""} onChange={e=>upd(eo.id,{notes:e.target.value})} placeholder={t.notes} rows={2} style={{...inp,marginTop:6,resize:"vertical"}}/>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:4,marginTop:8}}>
+          <button onClick={()=>{dup(eo.id);setEditId(null)}} style={bt("o")}>📋</button>
+          <button onClick={()=>{setDelId(eo.id);setEditId(null)}} style={bt("x")}>🗑</button>
+          <button onClick={()=>{setEditId(null);flash(t.saved)}} style={bt("p")}>✓ {t.save}</button>
+        </div>
+      </div>:null}/>
+
+      <Modal open={!!delId} onClose={()=>setDelId(null)} title={t.confirmDel} ch={
+        <div style={{display:"flex",gap:4,justifyContent:"flex-end",marginTop:4}}>
+          <button onClick={()=>setDelId(null)} style={bt("o")}>{t.no}</button>
+          <button onClick={()=>del(delId)} style={bt("x")}>{t.yes}</button>
+        </div>
+      }/>
+
+      {toast&&<div style={{position:"fixed",bottom:14,right:14,zIndex:2e3,background:C.gn,color:"#fff",padding:"6px 14px",borderRadius:6,fontWeight:700,fontSize:10}}>{toast}</div>}
     </div>
   );
 }
 
-export default function Home(){return<CastFlow/>}
+export default function Home() {
+  return (
+    <>
+      <Head>
+        <title>CastFlow — NIDC</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+      </Head>
+      <CastFlow />
+    </>
+  );
+}
